@@ -1,4 +1,3 @@
-from urllib.parse import urlencode
 import requests
 import pandas as pd
 import re
@@ -112,7 +111,11 @@ async def vectorsearch(query: str,
     id_name = "QID" if type == "item" else "PID"
 
     response = requests.get(
-        f"{VECTOR_SEARCH_URI}/{type}/query/?query={query}&k={limit}",
+        f"{VECTOR_SEARCH_URI}/{type}/query/",
+        params={
+            "query": query,
+            "k": limit,
+        },
         headers={
             "x-api-secret": x_api_key,
             "User-Agent": f"{USER_AGENT} ({user_agent})"
@@ -139,11 +142,12 @@ async def execute_sparql(sparql_query: str,
     Returns:
         pandas.DataFrame: A cleaned dataframe of the results.
     """
-    params = urlencode({"query": sparql_query, "format": "json"})
-    encoded_url = WD_QUERY_URI + "?" + params
-
     result = requests.get(
-        encoded_url,
+        WD_QUERY_URI,
+        params={
+            "query": sparql_query,
+            "format": "json",
+        },
         headers={"User-Agent": f"{USER_AGENT} ({user_agent})"},
         timeout=REQUEST_TIMEOUT_SECONDS,
     )
@@ -222,9 +226,9 @@ async def get_entities_labels_and_descriptions(ids, lang='en') -> dict:
     entities_dict = {
         id:
         {
-            "label": get_lang_specific(val['labels'],
+            "label": get_lang_specific(val.get('labels', {}),
                                         langs=[lang, 'mul', 'en']),
-            "description": get_lang_specific(val['descriptions'],
+            "description": get_lang_specific(val.get('descriptions', {}),
                                         langs=[lang, 'mul', 'en'])
         }
         for id, val in entities_data.items()

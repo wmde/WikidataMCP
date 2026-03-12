@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "external": {
+      "url": "https://wd-mcp.wmcloud.org/mcp"
+    }
+  }
+}

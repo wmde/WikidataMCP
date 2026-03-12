@@ -1,4 +1,4 @@
-from fastmcp import FastMCP
+from fastmcp import FastMCP, Context
 from fastmcp.server.dependencies import get_http_headers
 from wikidataMCP import utils
 import os
@@ -12,9 +12,10 @@ VECTOR_ENABLED = utils.vectorsearch_verify_apikey(WD_VECTORDB_API_SECRET)
 
 def _current_user_agent() -> str:
     try:
-        return get_http_headers().get("User-Agent", "")
+        headers = get_http_headers(include_all=True)
+        return headers.get("user-agent", "")
     except Exception:
-        return ""
+        return "http-wrapper"
 
 def _format_search_results(results: dict, entity_type: str) -> str:
     if not results:
