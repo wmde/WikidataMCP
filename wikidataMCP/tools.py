@@ -15,7 +15,7 @@ def _current_user_agent() -> str:
         headers = get_http_headers(include_all=True)
         return headers.get("user-agent", "")
     except Exception:
-        return "http-wrapper"
+        return ""
 
 def _format_search_results(results: dict, entity_type: str) -> str:
     if not results:

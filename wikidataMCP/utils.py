@@ -1,4 +1,6 @@
 import requests
+from requests.adapters import HTTPAdapter
+
 import pandas as pd
 import re
 import os
@@ -11,6 +13,10 @@ USER_AGENT = os.environ.get("USER_AGENT", "Wikidata MCP Client (embedding@wikime
 
 REQUEST_TIMEOUT_SECONDS = float(os.environ.get("REQUEST_TIMEOUT_SECONDS", "15"))
 
+SESSION = requests.Session()
+adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20)
+SESSION.mount("http://", adapter)
+SESSION.mount("https://", adapter)
 
 async def keywordsearch(query: str,
                         type: str = "item",
@@ -37,7 +43,7 @@ async def keywordsearch(query: str,
         "format": "json",
         "origin": "*",
     }
-    response = requests.get(
+    response = SESSION.get(
         WD_API_URI,
         params=params,
         headers={"User-Agent": f"{USER_AGENT} ({user_agent})"},
@@ -76,7 +82,7 @@ def vectorsearch_verify_apikey(x_api_key: str) -> bool:
         if not x_api_key:
             x_api_key = ''
 
-        response = requests.get(
+        response = SESSION.get(
             f"{VECTOR_SEARCH_URI}/item/query/?query=",
             headers={
                 "x-api-secret": x_api_key,
@@ -110,7 +116,7 @@ async def vectorsearch(query: str,
 
     id_name = "QID" if type == "item" else "PID"
 
-    response = requests.get(
+    response = SESSION.get(
         f"{VECTOR_SEARCH_URI}/{type}/query/",
         params={
             "query": query,
@@ -142,7 +148,7 @@ async def execute_sparql(sparql_query: str,
     Returns:
         pandas.DataFrame: A cleaned dataframe of the results.
     """
-    result = requests.get(
+    result = SESSION.get(
         WD_QUERY_URI,
         params={
             "query": sparql_query,
@@ -213,7 +219,7 @@ async def get_entities_labels_and_descriptions(ids, lang='en') -> dict:
             "format": "json",
             "origin": "*",
         }
-        response = requests.get(
+        response = SESSION.get(
             WD_API_URI,
             params=params,
             headers={"User-Agent": USER_AGENT},
@@ -265,7 +271,7 @@ async def get_entities_triplets(ids: list[str],
         "lang": lang,
         "format": "triplet",
     }
-    response = requests.get(
+    response = SESSION.get(
         TEXTIFER_URI,
         params=params,
         headers={"User-Agent": f"{USER_AGENT} ({user_agent})"},
@@ -300,7 +306,7 @@ async def get_claims(qid: str,
         "format": "json",
         "origin": "*",
     }
-    response = requests.get(
+    response = SESSION.get(
         WD_API_URI,
         params=params,
         headers={"User-Agent": USER_AGENT},
@@ -352,7 +358,7 @@ async def get_triplet_values(ids: list[str],
         "pid": ','.join(pid),
         "format": "json",
     }
-    response = requests.get(
+    response = SESSION.get(
         TEXTIFER_URI,
         params=params,
         headers={"User-Agent": f"{USER_AGENT} ({user_agent})"},

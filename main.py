@@ -1,7 +1,11 @@
 from typing import Any
 import inspect
+import os
 
 from fastapi import FastAPI, HTTPException, Query
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
 from markdown2 import markdown
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -25,6 +29,11 @@ app = FastAPI(
     lifespan=mcp_app.lifespan,
 )
 
+TOOLS_RATE_LIMIT = os.getenv("TOOLS_RATE_LIMIT", "30/minute")
+limiter = Limiter(key_func=lambda request: "tools-global")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 
 @app.middleware("http")
 async def normalize_mcp_root_path(request: Request, call_next):
@@ -35,7 +44,13 @@ async def normalize_mcp_root_path(request: Request, call_next):
 
 
 def _build_endpoint_signature(fn: Any) -> inspect.Signature:
-    params: list[inspect.Parameter] = []
+    params: list[inspect.Parameter] = [
+        inspect.Parameter(
+            name="request",
+            kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            annotation=Request,
+        )
+    ]
     signature = inspect.signature(fn)
 
     for param_name, param in signature.parameters.items():
@@ -69,7 +84,7 @@ def _build_endpoint_signature(fn: Any) -> inspect.Signature:
 
 def _register_tool_routes() -> None:
     def make_endpoint(fn: Any, tool_name: str, endpoint_signature: inspect.Signature):
-        async def endpoint(**kwargs):
+        async def endpoint(request: Request, **kwargs):
             try:
                 if inspect.iscoroutinefunction(fn):
                     result = await fn(**kwargs)
@@ -97,6 +112,7 @@ def _register_tool_routes() -> None:
         endpoint_name = f"api_tool_{tool_name}"
 
         endpoint = make_endpoint(fn, tool_name, endpoint_signature)
+        endpoint = limiter.limit(TOOLS_RATE_LIMIT)(endpoint)
         endpoint.__name__ = endpoint_name
         app.post(
             route_path,
