@@ -19,7 +19,7 @@ from wikidataMCP import tools
 
 templates = Jinja2Templates(directory="templates")
 mcp = tools.mcp
-mcp_app = mcp.http_app(path="/")
+mcp_app = mcp.http_app(path="/", stateless_http=True)
 
 
 app = FastAPI(
@@ -29,7 +29,7 @@ app = FastAPI(
     lifespan=mcp_app.lifespan,
 )
 
-TOOLS_RATE_LIMIT = os.getenv("TOOLS_RATE_LIMIT", "30/minute")
+TOOLS_RATE_LIMIT = os.getenv("TOOLS_RATE_LIMIT", "10/minute")
 limiter = Limiter(key_func=lambda request: "tools-global")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
