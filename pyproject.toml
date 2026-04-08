@@ -19,5 +19,25 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "types-requests>=2.32.4.20250611",
+    "ruff>=0.9.0"
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # Pyflakes (catches undefined names, unused imports, etc.)
+    "I",   # isort (import sorting)
+    "D",   # pydocstring (function/class documentation)
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "wikidatasearch"
 ]

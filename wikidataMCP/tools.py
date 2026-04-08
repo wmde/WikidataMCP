@@ -1,14 +1,40 @@
-from fastmcp import FastMCP, Context
-from fastmcp.server.dependencies import get_http_headers
-from wikidataMCP import utils
-import os
-import json
-import requests
+"""FastMCP tool and prompt registrations for Wikidata access."""
 
-mcp = FastMCP("Wikidata MCP")
+import json
+import os
+
+import requests
+from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_http_headers
+
+from wikidataMCP import utils
+
+SERVER_INSTRUCTIONS = """
+Explore Wikidata without assumptions.
+
+IMPORTANT:
+- QIDs and PIDs may be shuffled.
+- Never rely on memorized identifiers.
+- Never invent QIDs or PIDs.
+
+Execution policy:
+1. Start with discovery tools (`search_items`, `search_properties`) to identify
+   candidate QIDs/PIDs.
+2. Validate structure with `get_statements`, `get_statement_values`, or
+   `get_instance_and_subclass_hierarchy`.
+3. Use `execute_sparql` only when all QIDs/PIDs referenced in the query are
+   either:
+   - explicitly provided by the user, or
+   - discovered from prior tool outputs.
+4. If results are missing, empty, inconsistent, or ambiguous, run another
+  discovery/validation step, then refine and retry.
+""".strip()
+
+mcp = FastMCP("Wikidata MCP", instructions=SERVER_INSTRUCTIONS)
 
 WD_VECTORDB_API_SECRET = os.environ.get("WD_VECTORDB_API_SECRET")
 VECTOR_ENABLED = utils.vectorsearch_verify_apikey(WD_VECTORDB_API_SECRET)
+
 
 def _current_user_agent() -> str:
     try:
@@ -17,23 +43,26 @@ def _current_user_agent() -> str:
     except Exception:
         return ""
 
+
 def _format_search_results(results: dict, entity_type: str) -> str:
     if not results:
         return f"No matching Wikidata {entity_type}s found."
 
     text_val = [
-        f"{entity_id}: {val.get('label', '')} — {val.get('description', '')}"
-        for entity_id, val in results.items()
+        f"{entity_id}: {val.get('label', '')} — {val.get('description', '')}" for entity_id, val in results.items()
     ]
     return "\n".join(text_val)
+
 
 # Enable vector search if the API key is set
 if VECTOR_ENABLED:
 
     @mcp.tool()
-    async def search_items(query: str, lang: str = 'en') -> str:
+    async def search_items(query: str, lang: str = "en") -> str:
         """Search Wikidata items (QIDs) using vector and keyword search.
-        Find conceptually similar Wikidata items from a natural-language query. Matches are based on meaning and exact words.
+
+        Find conceptually similar Wikidata items from a natural-language query.
+        Matches are based on meaning and exact words.
 
         Args:
             query: Natural-language description of the concept to find.
@@ -44,7 +73,7 @@ if VECTOR_ENABLED:
                 QID: label — description
 
         Example:
-            >>> vector_search_items("English science-fiction novel")
+            >>> search_items("English science-fiction novel")
             Q23163: A Scientific Romance — 1997 novel by Ronald Wright
             Q627333: The Time Machine — 1895 dystopian science fiction novella by H. G. Wells
         """
@@ -84,11 +113,12 @@ if VECTOR_ENABLED:
 
         return _format_search_results(results, "item")
 
-
     @mcp.tool()
-    async def search_properties(query: str, lang: str = 'en') -> str:
+    async def search_properties(query: str, lang: str = "en") -> str:
         """Search Wikidata properties (PIDs) using vector and keyword search.
-        Find relevant Wikidata properties from a natural-language description of the relationship you need. Matches are based on meaning and exact words.
+
+        Find relevant Wikidata properties from a natural-language description of
+        the relationship you need. Matches are based on meaning and exact words.
 
         Args:
             query: Natural-language description of the concept to find.
@@ -99,7 +129,7 @@ if VECTOR_ENABLED:
                 PID: label — description
 
         Example:
-            >>> vector_search_properties("residence of a person")
+            >>> search_properties("residence of a person")
             P551: residence — the place where the person is or has been, resident
             P276: location — location of the object, structure or event
         """
@@ -147,9 +177,11 @@ else:
     )
 
     @mcp.tool()
-    async def search_items(query: str, lang: str = 'en') -> str:
+    async def search_items(query: str, lang: str = "en") -> str:
         """Search Wikidata items (QIDs) with exact text matching.
-        Looks up items by label/alias or literal phrases expected to appear in Wikidata. Useful when you already know the entity you're looking for.
+
+        Looks up items by label/alias or literal phrases expected to appear in
+        Wikidata. Useful when you already know the entity you are looking for.
 
         Args:
             query: Label, alias, or phrase expected to appear verbatim.
@@ -160,7 +192,7 @@ else:
             QID: label — description
 
         Example:
-            >>> keyword_search_items("Douglas Adams")
+            >>> search_items("Douglas Adams")
             Q42: Douglas Adams — English science fiction writer and humorist
             Q28421831: Douglas Adams — American environmental engineer
         """
@@ -181,11 +213,12 @@ else:
 
         return _format_search_results(results, "item")
 
-
     @mcp.tool()
-    async def search_properties(query: str, lang: str = 'en') -> str:
+    async def search_properties(query: str, lang: str = "en") -> str:
         """Search Wikidata properties (PIDs) with exact text matching.
-        Looks up properties by label/alias or literal phrases expected to appear in Wikidata. Useful when expected property name is already known.
+
+        Looks up properties by label/alias or literal phrases expected to appear
+        in Wikidata. Useful when the expected property name is already known.
 
         Args:
             query: Label, alias, or phrase expected to appear verbatim.
@@ -196,7 +229,7 @@ else:
             PID: label — description
 
         Example:
-            >>> keyword_search_properties("residence")
+            >>> search_properties("residence")
             P551: residence — the place where the person is or has been, resident
             P276: location — location of the object, structure or event
         """
@@ -219,10 +252,12 @@ else:
 
 
 @mcp.tool()
-async def get_statements(entity_id: str,
-                        include_external_ids: bool = False,
-                        lang: str = 'en') -> str:
-    """Return the direct statements (property-value pairs) of an entity. Expose all direct graph connections of a Wikidata entity to inspect its factual context. This tool does not include deprecated values, qualifiers, or references (use `get_statement_values` instead).
+async def get_statements(entity_id: str, include_external_ids: bool = False, lang: str = "en") -> str:
+    """Return direct statements (property-value pairs) for a Wikidata entity.
+
+    Expose graph connections to inspect factual context. This tool does not
+    include deprecated values, qualifiers, or references.
+    Use `get_statement_values` for those details.
 
     Args:
         entity_id: A QID or PID such as "Q42" or "P31".
@@ -238,7 +273,6 @@ async def get_statements(entity_id: str,
         Douglas Adams (Q42): instance of (P31): human (Q5)
         Douglas Adams (Q42): occupation (P106): novelist (Q6625963)
     """
-
     if not entity_id.strip():
         return "Entity ID cannot be empty."
 
@@ -263,10 +297,11 @@ async def get_statements(entity_id: str,
 
 
 @mcp.tool()
-async def get_statement_values(entity_id: str,
-                           property_id: str,
-                           lang: str = 'en') -> str:
-    """Get all values for a specific statement (entity-property pair), including all qualifiers, ranks and references. Returns complete statement information including deprecated values and reference data that are excluded from `get_statements`.
+async def get_statement_values(entity_id: str, property_id: str, lang: str = "en") -> str:
+    """Return full values for an entity-property statement pair.
+
+    Includes qualifiers, ranks, and references, including deprecated values and
+    references excluded from `get_statements`.
 
     Args:
         entity_id: A QID or PID such as "Q42" or "P31".
@@ -292,7 +327,6 @@ async def get_statement_values(entity_id: str,
             - stated in (P248): Who's Who (Q2567271)
             - Who's Who UK ID (P4789): U4994
     """
-
     if not entity_id.strip():
         return "Entity ID cannot be empty."
     if not property_id.strip():
@@ -328,10 +362,11 @@ async def get_statement_values(entity_id: str,
 
 
 @mcp.tool()
-async def get_instance_and_subclass_hierarchy(entity_id: str,
-                            max_depth: int = 5,
-                            lang: str = 'en') -> str:
-    """Expose the hierarchical context of a Wikidata entity to inspect its ontological placement. This tool retrieves hierarchical relationships based on "instance of" (P31) and "subclass of" (P279) properties.
+async def get_instance_and_subclass_hierarchy(entity_id: str, max_depth: int = 5, lang: str = "en") -> str:
+    """Expose hierarchical context for a Wikidata entity.
+
+    Retrieves relationships based on "instance of" (P31) and
+    "subclass of" (P279) properties.
 
     Args:
         entity_id: A QID or PID such as "Q42" or "P31".
@@ -357,7 +392,6 @@ async def get_instance_and_subclass_hierarchy(entity_id: str,
           }
         }
     """
-
     if not entity_id.strip():
         return "Entity ID cannot be empty."
 
@@ -382,7 +416,8 @@ async def get_instance_and_subclass_hierarchy(entity_id: str,
 async def execute_sparql(sparql: str, K: int = 10) -> str:
     """Execute a SPARQL query against Wikidata and return up to K rows as CSV.
 
-    IMPORTANT: All QIDs (items) and PIDs (properties) are randomly shuffled, so you cannot rely on any prior knowledge of Wikidata identifiers or schema. The only way to retrieve information is by using the provided search and get tools prior to executing SPARQL.
+    Use this only when every QID/PID in the query was either user-provided or
+    discovered from earlier tool outputs in this session.
 
     Tips:
         • Use the search and entity tools first to discover relevant QIDs and PIDs before writing a SPARQL query.
@@ -421,7 +456,6 @@ async def execute_sparql(sparql: str, K: int = 10) -> str:
         0;Q42
         1;Q820
     """
-
     if not sparql.strip():
         return "SPARQL query cannot be empty."
 
@@ -439,20 +473,17 @@ async def execute_sparql(sparql: str, K: int = 10) -> str:
         return "Unexpected server error while processing the request."
 
     try:
-        return result.to_csv(sep=';', index=True, header=True)
+        return result.to_csv(sep=";", index=True, header=True)
     except Exception:
         return "Unexpected server error while processing the request."
 
 
 @mcp.prompt
 def explore_wikidata(query: str) -> str:
-    """Instruct the model to explore Wikidata without assumptions."""
-
+    """Provide a workflow helper for exploratory Wikidata tasks."""
     return f"""
-    You are an assistant that explores Wikidata on behalf of the user.
-    The user's request is: '{query}'.
-
-    IMPORTANT: All QIDs (items) and PIDs (properties) are randomly shuffled, so you cannot rely on any prior knowledge of Wikidata identifiers or schema. The only way to retrieve information is by using the provided tools.
+    User request: '{query}'.
+    Follow server instructions for all policy and safety constraints.
 
     Follow this step-by-step workflow:
     1. **Identify Candidate Items**
@@ -465,14 +496,18 @@ def explore_wikidata(query: str) -> str:
         - Look for patterns across multiple items (which properties repeat, how values are modeled).
 
     3. **Refine Understanding with Statement Details**
-        - When qualifiers, deprecated values, or references matter, retrieve statement values for a specific entity and property pair.
+        - When qualifiers, deprecated values, or references matter, retrieve
+          statement values for a specific entity and property pair.
         - If the retrieved statements already answer the user's request, stop here and present the results.
 
     4. **Write and Test SPARQL**
-        - Construct and execute a SPARQL query using the discovered QIDs & PIDs.
+        - Construct and execute a SPARQL query using only QIDs/PIDs that were
+          user-provided or discovered in prior tool outputs.
         - Inspect the returned rows for missing or incorrect values, unexpected types, or empty columns.
-        - If the results are not as expected, iteratively refine the SPARQL query and repeat until the results are satisfactory.
+        - If results are not as expected, iteratively refine the SPARQL query
+          and repeat until the output is satisfactory.
     """
+
 
 # Canonical registry used by HTTP wrappers and docs route generation.
 TOOL_LIST = {
