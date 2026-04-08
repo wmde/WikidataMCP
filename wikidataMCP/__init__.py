@@ -1,1 +1,1 @@
-"""Wikidata MCP server"""
+"""Wikidata MCP server."""

@@ -1,21 +1,21 @@
-from typing import Any
+"""ASGI application exposing Wikidata tools and MCP transport endpoints."""
+
 import inspect
 import os
+from typing import Any
 
+import uvicorn
 from fastapi import FastAPI, HTTPException, Query
+from fastmcp import Context
+from fastmcp.tools.tool import FunctionTool
+from markdown2 import markdown
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-
-from markdown2 import markdown
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.templating import Jinja2Templates
-import uvicorn
 
-from fastmcp import Context
-from fastmcp.tools.tool import FunctionTool
 from wikidataMCP import tools
-
 
 templates = Jinja2Templates(directory="templates")
 mcp = tools.mcp
@@ -37,6 +37,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 @app.middleware("http")
 async def normalize_mcp_root_path(request: Request, call_next):
+    """Normalize `/mcp` requests to `/mcp/` for transport compatibility."""
     # Accept both /mcp and /mcp/ without relying on client-side redirect handling.
     if request.scope.get("path") == "/mcp":
         request.scope["path"] = "/mcp/"
@@ -62,9 +63,7 @@ def _build_endpoint_signature(fn: Any) -> inspect.Signature:
         if param.annotation is Context:
             continue
 
-        annotation = (
-            param.annotation if param.annotation is not inspect.Parameter.empty else Any
-        )
+        annotation = param.annotation if param.annotation is not inspect.Parameter.empty else Any
         if param.default is inspect.Parameter.empty:
             query_default = Query(...)
         else:
@@ -124,6 +123,7 @@ def _register_tool_routes() -> None:
 
 @app.get("/", include_in_schema=False)
 async def home(request: Request):
+    """Render the landing page with the prompt and available tool list."""
     prompt = await mcp.get_prompt("explore_wikidata")
     prompt_rendered = await prompt.render({"query": "[User Prompt]"})
     prompt_html = markdown(prompt_rendered[0].content.text)
@@ -140,6 +140,7 @@ async def home(request: Request):
 
 @app.get("/health", tags=["meta"])
 async def health():
+    """Return a lightweight service health response."""
     return JSONResponse({"status": "ok"})
 
 
