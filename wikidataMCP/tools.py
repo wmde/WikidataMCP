@@ -10,7 +10,7 @@ from .logger import Logger
 mcp = FastMCP("Wikidata MCP")
 
 WD_VECTORDB_API_SECRET = os.environ.get("WD_VECTORDB_API_SECRET")
-VECTOR_ENABLED = utils.vectorsearch_verify_apikey(WD_VECTORDB_API_SECRET)
+VECTOR_ENABLED = os.environ.get("VECTOR_ENABLED", "true").lower() == "true"
 
 def _current_user_agent() -> str:
     try:
@@ -47,7 +47,7 @@ if VECTOR_ENABLED:
                 QID: label — description
 
         Example:
-            >>> vector_search_items("English science-fiction novel")
+            >>> search_items("English science-fiction novel")
             Q23163: A Scientific Romance — 1997 novel by Ronald Wright
             Q627333: The Time Machine — 1895 dystopian science fiction novella by H. G. Wells
         """
@@ -113,7 +113,7 @@ if VECTOR_ENABLED:
                 PID: label — description
 
         Example:
-            >>> vector_search_properties("residence of a person")
+            >>> search_properties("residence of a person")
             P551: residence — the place where the person is or has been, resident
             P276: location — location of the object, structure or event
         """
@@ -180,7 +180,7 @@ else:
             QID: label — description
 
         Example:
-            >>> keyword_search_items("Douglas Adams")
+            >>> search_items("Douglas Adams")
             Q42: Douglas Adams — English science fiction writer and humorist
             Q28421831: Douglas Adams — American environmental engineer
         """
@@ -227,7 +227,7 @@ else:
             PID: label — description
 
         Example:
-            >>> keyword_search_properties("residence")
+            >>> search_properties("residence")
             P551: residence — the place where the person is or has been, resident
             P276: location — location of the object, structure or event
         """

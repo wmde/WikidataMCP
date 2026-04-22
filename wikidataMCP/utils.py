@@ -68,33 +68,6 @@ async def keywordsearch(query: str,
     return item_dict
 
 
-def vectorsearch_verify_apikey(x_api_key: str) -> bool:
-    """
-    Verifies if the provided API key is valid for vector search.
-
-    Args:
-        x_api_key (str): API key for accessing the vector database.
-
-    Returns:
-        bool: True if the API key is valid, False otherwise.
-    """
-    try:
-        if not x_api_key:
-            x_api_key = ''
-
-        response = SESSION.get(
-            f"{VECTOR_SEARCH_URI}/item/query/?query=",
-            headers={
-                "x-api-secret": x_api_key,
-                "User-Agent": USER_AGENT,
-            },
-            timeout=REQUEST_TIMEOUT_SECONDS,
-        )
-        return response.status_code != 401
-    except:
-        return False
-
-
 async def vectorsearch(query: str,
                        x_api_key: str,
                        type: str = "item",
