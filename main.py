@@ -1,4 +1,3 @@
-from contextlib import asynccontextmanager
 from typing import Any
 import inspect
 import os
@@ -23,17 +22,12 @@ templates = Jinja2Templates(directory="templates")
 mcp = tools.mcp
 mcp_app = mcp.http_app(path="/", stateless_http=True)
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    logger.initialize_database()
-    async with mcp_app.lifespan(app):
-        yield
 
 app = FastAPI(
     title="Wikidata Tool API",
     description="Auto-generated HTTP routes for all FastMCP tools.",
     version="0.1.0",
-    lifespan=lifespan,
+    lifespan=mcp_app.lifespan,
 )
 
 
@@ -41,6 +35,12 @@ TOOLS_RATE_LIMIT = os.getenv("TOOLS_RATE_LIMIT", "10/minute")
 limiter = Limiter(key_func=lambda request: "tools-global")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize the logger database."""
+    logger.initialize_database()
 
 
 @app.middleware("http")

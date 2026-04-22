@@ -115,7 +115,7 @@ class Logger(Base):
                 Logger.add_request,
                 **kwargs
             ))
-        except RuntimeError:
+        except:
             # no running loop (safe fallback)
             Logger.add_request(**kwargs)
 
