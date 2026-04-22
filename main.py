@@ -37,12 +37,6 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize the logger database."""
-    logger.initialize_database()
-
-
 @app.middleware("http")
 async def normalize_mcp_root_path(request: Request, call_next):
     """Accept both /mcp and /mcp/ without relying on client-side redirect handling."""

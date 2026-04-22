@@ -161,3 +161,5 @@ def initialize_database():
     except Exception as e:
         print(f"Error while initializing labels database: {e}")
         return False
+
+initialize_database()
