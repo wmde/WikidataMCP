@@ -1,6 +1,8 @@
+from contextlib import asynccontextmanager
 from typing import Any
 import inspect
 import os
+import time
 
 from fastapi import FastAPI, HTTPException, Query
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -14,20 +16,26 @@ import uvicorn
 
 from fastmcp import Context
 from fastmcp.tools.tool import FunctionTool
-from wikidataMCP import tools
+from wikidataMCP import logger, tools
 
 
 templates = Jinja2Templates(directory="templates")
 mcp = tools.mcp
 mcp_app = mcp.http_app(path="/", stateless_http=True)
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.initialize_database()
+    async with mcp_app.lifespan(app):
+        yield
 
 app = FastAPI(
     title="Wikidata Tool API",
     description="Auto-generated HTTP routes for all FastMCP tools.",
     version="0.1.0",
-    lifespan=mcp_app.lifespan,
+    lifespan=lifespan,
 )
+
 
 TOOLS_RATE_LIMIT = os.getenv("TOOLS_RATE_LIMIT", "10/minute")
 limiter = Limiter(key_func=lambda request: "tools-global")
@@ -37,7 +45,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 @app.middleware("http")
 async def normalize_mcp_root_path(request: Request, call_next):
-    # Accept both /mcp and /mcp/ without relying on client-side redirect handling.
+    """Accept both /mcp and /mcp/ without relying on client-side redirect handling."""
     if request.scope.get("path") == "/mcp":
         request.scope["path"] = "/mcp/"
     return await call_next(request)
@@ -124,19 +132,28 @@ def _register_tool_routes() -> None:
 
 @app.get("/", include_in_schema=False)
 async def home(request: Request):
-    prompt = await mcp.get_prompt("explore_wikidata")
-    prompt_rendered = await prompt.render({"query": "[User Prompt]"})
-    prompt_html = markdown(prompt_rendered[0].content.text)
+    start_time = time.time()
 
-    return templates.TemplateResponse(
-        request,
-        "docs.html",
-        {
-            "tools": tools.TOOL_LIST.keys(),
-            "prompt": prompt_html,
-        },
-    )
+    try:
+        prompt = await mcp.get_prompt("explore_wikidata")
+        prompt_rendered = await prompt.render({"query": "[User Prompt]"})
+        prompt_html = markdown(prompt_rendered[0].content.text)
 
+        return templates.TemplateResponse(
+            request,
+            "docs.html",
+            {
+                "tools": tools.TOOL_LIST.keys(),
+                "prompt": prompt_html,
+            },
+        )
+    finally:
+        logger.Logger.add_request_async(
+            toolname="/",
+            start_time=start_time,
+            parameters={},
+            user_agent=request.headers.get("user-agent", "unknown")[:255],
+        )
 
 @app.get("/health", tags=["meta"])
 async def health():
