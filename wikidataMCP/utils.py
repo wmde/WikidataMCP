@@ -69,7 +69,6 @@ async def keywordsearch(query: str,
 
 
 async def vectorsearch(query: str,
-                       x_api_key: str,
                        type: str = "item",
                        limit: int = 10,
                        lang: str = 'en',
@@ -96,7 +95,6 @@ async def vectorsearch(query: str,
             "k": limit,
         },
         headers={
-            "x-api-secret": x_api_key,
             "User-Agent": f"{USER_AGENT} ({user_agent})"
         },
         timeout=REQUEST_TIMEOUT_SECONDS,

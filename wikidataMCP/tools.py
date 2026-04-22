@@ -9,7 +9,6 @@ from .logger import Logger
 
 mcp = FastMCP("Wikidata MCP")
 
-WD_VECTORDB_API_SECRET = os.environ.get("WD_VECTORDB_API_SECRET")
 VECTOR_ENABLED = os.environ.get("VECTOR_ENABLED", "true").lower() == "true"
 
 def _current_user_agent() -> str:
@@ -30,7 +29,7 @@ def _format_search_results(results: dict, entity_type: str) -> str:
     return "\n".join(text_val)
 
 
-# Enable vector search if the API key is set
+# Enable vector search
 if VECTOR_ENABLED:
 
     @mcp.tool()
@@ -61,7 +60,6 @@ if VECTOR_ENABLED:
             try:
                 results = await utils.vectorsearch(
                     query,
-                    WD_VECTORDB_API_SECRET,
                     lang=lang,
                     user_agent=user_agent,
                 )
@@ -127,7 +125,6 @@ if VECTOR_ENABLED:
             try:
                 results = await utils.vectorsearch(
                     query,
-                    WD_VECTORDB_API_SECRET,
                     type="property",
                     lang=lang,
                     user_agent=user_agent,
