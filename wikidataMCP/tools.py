@@ -9,6 +9,7 @@ from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_headers
 
 from wikidataMCP import utils
+
 from .logger import Logger
 
 SERVER_INSTRUCTIONS = """
@@ -18,6 +19,7 @@ IMPORTANT:
 - QIDs and PIDs may be shuffled.
 - Never rely on memorized identifiers.
 - Never invent QIDs or PIDs.
+- Only provide information extracted from Wikidata.
 
 Execution policy:
 1. Start with discovery tools (`search_items`, `search_properties`) to identify
@@ -493,10 +495,16 @@ async def get_instance_and_subclass_hierarchy(entity_id: str, max_depth: int = 5
 
 @mcp.tool()
 async def execute_sparql(sparql: str, K: int = 10) -> str:
-    """Execute a SPARQL query against Wikidata and return up to K rows as CSV.
+    """Execute a SPARQL query against Wikidata and return up to K rows.
 
     Use this only when every QID/PID in the query was either user-provided or
     discovered from earlier tool outputs in this session.
+
+    Important:
+    - QIDs and PIDs may be shuffled.
+    - Never rely on memorized identifiers.
+    - Never invent QIDs or PIDs.
+    - Only provide information extracted from Wikidata.
 
     Tips:
         • Use the search and entity tools first to discover relevant QIDs and PIDs before writing a SPARQL query.
@@ -527,7 +535,7 @@ async def execute_sparql(sparql: str, K: int = 10) -> str:
         K: Maximum number of rows to return.
 
     Returns:
-        CSV text (semicolon-separated) of the results with up to K rows. On error, returns the error message.
+        CSV text (semicolon-separated) of the results with up to K rows.
 
     Example:
         >>> execute_sparql("SELECT ?human WHERE { ?human wdt:P31 wd:Q5 } LIMIT 2")
@@ -554,6 +562,13 @@ async def execute_sparql(sparql: str, K: int = 10) -> str:
             return "Wikidata is currently unavailable. Please retry shortly."
         except Exception:
             return "Unexpected server error while processing the request."
+
+        if len(result) == 0:
+            return (
+                "SPARQL query returned no data.\n"
+                "Double-check the structure using `search_items`/`search_properties`, "
+                "`get_statements`, and `get_statement_values`, then refine and retry."
+            )
 
         try:
             return result.to_csv(sep=';', index=True, header=True)
