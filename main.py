@@ -121,6 +121,15 @@ def _register_tool_routes() -> None:
         )(endpoint)
 
 
+@app.middleware("http")
+async def normalize_mcp_path(request: Request, call_next):
+    if request.url.path == "/mcp":
+        scope = dict(request.scope)
+        scope["path"] = "/mcp/"
+        request = Request(scope, request.receive)
+    return await call_next(request)
+
+
 @app.get("/", include_in_schema=False)
 async def home(request: Request):
     """Render the landing page with the prompt and available tool list."""
