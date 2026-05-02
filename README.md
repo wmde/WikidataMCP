@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/philippesaade-wmde-wikidatamcp-badge.png)](https://mseep.ai/app/philippesaade-wmde-wikidatamcp)
+
 # Wikidata MCP
 The **Wikidata MCP (Model Context Protocol)** provides a set of standardized tools that allow large language models (LLMs) to explore and query Wikidata programmatically. It is designed for agentic AI or AI workflows that need to search, inspect, and query Wikidata, without relying on hardcoded assumptions about its structure or content.
 
