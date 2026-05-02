@@ -1,9 +1,11 @@
-import requests
-from requests.adapters import HTTPAdapter
+"""Helper utilities for Wikidata API, textifier, and SPARQL access."""
+
+import os
+import re
 
 import pandas as pd
-import re
-import os
+import requests
+from requests.adapters import HTTPAdapter
 
 VECTOR_SEARCH_URI = os.environ.get("VECTOR_SEARCH_URI", "https://wd-vectordb.wmcloud.org")
 TEXTIFER_URI = os.environ.get("TEXTIFER_URI", "https://wd-textify.wmcloud.org")
@@ -18,21 +20,22 @@ adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20)
 SESSION.mount("http://", adapter)
 SESSION.mount("https://", adapter)
 
-async def keywordsearch(query: str,
-                        type: str = "item",
-                        limit: int = 10,
-                        lang: str = 'en',
-                        user_agent = '') -> list:
-    """
-    Searches for Wikidata items or properties that match the input text.
+
+async def keywordsearch(query: str, type: str = "item", limit: int = 10, lang: str = "en", user_agent="") -> list:
+    """Searches for Wikidata items or properties that match the input text.
 
     Args:
         query (str): The text to search for in Wikidata items or properties.
-        type (str, optional): Type of entity to search for, either "item" or "property". Defaults to "item".
+        type (str, optional): Type of entity to search for. One of
+            "item" or "property". Defaults to "item".
         limit (int, optional): Maximum number of results to return. Defaults to 10.
+        lang (str, optional): Language code used for labels and descriptions.
+            Defaults to "en".
+        user_agent (str, optional): Caller-provided suffix appended to
+            the service User-Agent. Defaults to "".
 
     Returns:
-        list: A list of dictionaries representing the matching Wikidata items or properties, each containing "id", "label", and "description".
+        list: Matching entities with identifier, label, and description fields.
     """
     params = {
         "action": "wbsearchentities",
@@ -54,14 +57,9 @@ async def keywordsearch(query: str,
     response_dict_search = response.json().get("search", {})
 
     item_dict = {
-        x["id"]:
-        {
-            "label": x.get("display", {})\
-                        .get("label", {})\
-                        .get("value", ""),
-            "description": x.get("display", {})\
-                            .get("description", {})\
-                            .get("value", ""),
+        x["id"]: {
+            "label": x.get("display", {}).get("label", {}).get("value", ""),
+            "description": x.get("display", {}).get("description", {}).get("value", ""),
         }
         for x in response_dict_search
     }
@@ -73,19 +71,22 @@ async def vectorsearch(query: str,
                        limit: int = 10,
                        lang: str = 'en',
                        user_agent = '') -> list:
-    """
-    Searches for Wikidata items or properties similar to the input text using a vector database.
+    """Searches for Wikidata items or properties similar to the input text using a vector database.
 
     Args:
         query (str): The text to search for in Wikidata items or properties.
         x_api_key (str): API key for accessing the vector database.
-        type (str, optional): Type of entity to search for, either "item" or "property". Defaults to "item".
+        type (str, optional): Type of entity to search for. One of
+            "item" or "property". Defaults to "item".
         limit (int, optional): Maximum number of results to return. Defaults to 10.
+        lang (str, optional): Language code used when resolving labels.
+            Defaults to "en".
+        user_agent (str, optional): Caller-provided suffix appended to
+            the service User-Agent. Defaults to "".
 
     Returns:
-        list: A list of dictionaries representing the matching Wikidata items or properties, each containing "id", "label", and "description".
+        list: Matching entities with identifier, label, and description fields.
     """
-
     id_name = "QID" if type == "item" else "PID"
 
     response = SESSION.get(
@@ -107,14 +108,16 @@ async def vectorsearch(query: str,
     entities_dict = await get_entities_labels_and_descriptions(ids, lang=lang)
     return entities_dict
 
-async def execute_sparql(sparql_query: str,
-                         K: int = 10,
-                         user_agent = '') -> pd.DataFrame:
-    """
-    Execute a SPARQL query on Wikidata.
+
+async def execute_sparql(sparql_query: str, K: int = 10, user_agent="") -> pd.DataFrame:
+    """Execute a SPARQL query on Wikidata.
 
     Args:
         sparql_query (str): The SPARQL query to execute.
+        K (int, optional): Maximum number of rows to keep in output.
+            Defaults to 10.
+        user_agent (str, optional): Caller-provided suffix appended to
+            the service User-Agent. Defaults to "".
 
     Returns:
         pandas.DataFrame: A cleaned dataframe of the results.
@@ -137,10 +140,7 @@ async def execute_sparql(sparql_query: str,
     result_bindings = result.json()["results"]["bindings"]
     df = pd.json_normalize(result_bindings)
 
-    value_cols = {
-        c: c.split(".")[0]
-        for c in df.columns if c.endswith(".value")
-    }
+    value_cols = {c: c.split(".")[0] for c in df.columns if c.endswith(".value")}
     df = df[list(value_cols)].rename(columns=value_cols)
 
     def shorten(val: str) -> str:
@@ -154,17 +154,18 @@ async def execute_sparql(sparql_query: str,
     df = df.head(K)
     return df
 
-def get_lang_specific(data, langs=['en', 'mul']) -> str:
+
+def get_lang_specific(data, langs=["en", "mul"]) -> str:
+    """Return the first non-empty label/description value for preferred languages."""
     for lang in langs:
         if lang in data:
-            if data[lang].get('value'):
-                return data[lang].get('value')
-    return ''
+            if data[lang].get("value"):
+                return data[lang].get("value")
+    return ""
 
 
-async def get_entities_labels_and_descriptions(ids, lang='en') -> dict:
-    """
-    Fetches labels and descriptions for a list of Wikidata entity IDs.
+async def get_entities_labels_and_descriptions(ids, lang="en") -> dict:
+    """Fetches labels and descriptions for a list of Wikidata entity IDs.
 
     Args:
         ids (list[str]): List of Wikidata entity IDs (QIDs or PIDs).
@@ -181,11 +182,11 @@ async def get_entities_labels_and_descriptions(ids, lang='en') -> dict:
     # Wikidata API has a limit on the number of IDs per request,
     # typically 50 for wbgetentities.
     for chunk_idx in range(0, len(ids), 50):
-        ids_chunk = ids[chunk_idx:chunk_idx+50]
+        ids_chunk = ids[chunk_idx : chunk_idx + 50]
         params = {
             "action": "wbgetentities",
             "ids": "|".join(ids_chunk),
-            "languages": lang+"|mul|en",
+            "languages": lang + "|mul|en",
             "props": "labels|descriptions",
             "format": "json",
             "origin": "*",
@@ -201,32 +202,36 @@ async def get_entities_labels_and_descriptions(ids, lang='en') -> dict:
         entities_data = entities_data | chunk_data
 
     entities_dict = {
-        id:
-        {
-            "label": get_lang_specific(val.get('labels', {}),
-                                        langs=[lang, 'mul', 'en']),
-            "description": get_lang_specific(val.get('descriptions', {}),
-                                        langs=[lang, 'mul', 'en'])
+        id: {
+            "label": get_lang_specific(val.get("labels", {}), langs=[lang, "mul", "en"]),
+            "description": get_lang_specific(val.get("descriptions", {}), langs=[lang, "mul", "en"]),
         }
         for id, val in entities_data.items()
     }
     return entities_dict
 
 
-async def get_entities_triplets(ids: list[str],
-                                external_ids: bool = False,
-                                all_ranks: bool = False,
-                                qualifiers: bool = True,
-                                lang: str = 'en',
-                                user_agent = '') -> dict:
-    """
-    Fetches triplet representations for claims of a list of Wikidata entity IDs.
+async def get_entities_triplets(
+    ids: list[str],
+    external_ids: bool = False,
+    all_ranks: bool = False,
+    qualifiers: bool = True,
+    lang: str = "en",
+    user_agent="",
+) -> dict:
+    """Fetches triplet representations for claims of a list of Wikidata entity IDs.
 
     Args:
         ids (list[str]): A list of Wikidata entity IDs to fetch triplet data for.
-        external_ids (bool, optional): Whether to include external identifiers linking to other databases. Defaults to False.
-        all_ranks (bool, optional): Whether to include all ranks of statements (preferred, normal, deprecated). Defaults to False.
+        external_ids (bool, optional): Whether to include external identifiers
+            linking to other databases. Defaults to False.
+        all_ranks (bool, optional): Whether to include all statement ranks
+            (preferred, normal, deprecated). Defaults to False.
+        qualifiers (bool, optional): Whether to include qualifiers in output.
+            Defaults to True.
         lang (str, optional): Language code available on Wikidata. Default to en.
+        user_agent (str, optional): Caller-provided suffix appended to
+            the service User-Agent. Defaults to "".
 
     Returns:
         dict: A dictionary where keys are entity IDs and values are their RDF triplet representations as strings.
@@ -235,7 +240,7 @@ async def get_entities_triplets(ids: list[str],
         return {}
 
     params = {
-        "id": ','.join(ids),
+        "id": ",".join(ids),
         "external_ids": external_ids,
         "all_ranks": all_ranks,
         "qualifiers": qualifiers,
@@ -253,11 +258,9 @@ async def get_entities_triplets(ids: list[str],
 
     return info
 
-async def get_claims(qid: str,
-                    pid: str,
-                    lang: str = 'en') -> dict:
-    """
-    Fetches claim values for a given Wikidata QID and PID.
+
+async def get_claims(qid: str, pid: str, lang: str = "en") -> dict:
+    """Fetches claim values for a given Wikidata QID and PID.
 
     Args:
         qid (str): The Wikidata QID to fetch claim data for.
@@ -294,24 +297,32 @@ async def get_claims(qid: str,
             claim_values.append(datavalue["value"])
     return claim_values
 
-async def get_triplet_values(ids: list[str],
-                            pid: list[str],
-                            external_ids: bool = False,
-                            all_ranks: bool = False,
-                            references: bool = False,
-                            qualifiers: bool = True,
-                            lang: str = 'en',
-                            user_agent = '') -> dict:
-    """
-    Fetches triplet representations for claims of a list of Wikidata entity IDs.
+
+async def get_triplet_values(
+    ids: list[str],
+    pid: list[str],
+    external_ids: bool = False,
+    all_ranks: bool = False,
+    references: bool = False,
+    qualifiers: bool = True,
+    lang: str = "en",
+    user_agent="",
+) -> dict:
+    """Fetches triplet representations for claims of a list of Wikidata entity IDs.
 
     Args:
         ids (list[str]): A list of Wikidata entity IDs to fetch triplet data for.
-        pid (str): A property ID to filter the claims.
-        external_ids (bool, optional): Whether to include external identifiers linking to other databases. Defaults to False.
-        all_ranks (bool, optional): Whether to include all ranks of statements (preferred, normal, deprecated). Defaults to False.
+        pid (list[str]): Property IDs used to filter claims.
+        external_ids (bool, optional): Whether to include external identifiers
+            linking to other databases. Defaults to False.
+        all_ranks (bool, optional): Whether to include all statement ranks
+            (preferred, normal, deprecated). Defaults to False.
         references (bool, optional): Whether to retrieve references. Default to False.
+        qualifiers (bool, optional): Whether to retrieve qualifiers.
+            Defaults to True.
         lang (str, optional): Language code available on Wikidata. Default to en.
+        user_agent (str, optional): Caller-provided suffix appended to
+            the service User-Agent. Defaults to "".
 
     Returns:
         dict: A dictionary where keys are entity IDs and values are the triplet data as JSON.
@@ -320,13 +331,13 @@ async def get_triplet_values(ids: list[str],
         return {}
 
     params = {
-        "id": ','.join(ids),
+        "id": ",".join(ids),
         "external_ids": external_ids,
         "all_ranks": all_ranks,
         "references": references,
         "qualifiers": qualifiers,
         "lang": lang,
-        "pid": ','.join(pid),
+        "pid": ",".join(pid),
         "format": "json",
     }
     response = SESSION.get(
@@ -340,11 +351,9 @@ async def get_triplet_values(ids: list[str],
 
     return info
 
-async def get_hierarchy_data(qid: str,
-                       max_depth: int = 5,
-                       lang: str = 'en') -> dict:
-    """
-    Fetches hierarchical data for a given Wikidata QID.
+
+async def get_hierarchy_data(qid: str, max_depth: int = 5, lang: str = "en") -> dict:
+    """Fetches hierarchical data for a given Wikidata QID.
 
     Args:
         qid (str): The Wikidata QID to fetch hierarchical data for.
@@ -362,42 +371,31 @@ async def get_hierarchy_data(qid: str,
     while qids and level <= max_depth:
         new_qids = set()
 
-        current_data = await get_triplet_values(qids,
-                                          pid=['P31', 'P279'],
-                                          lang=lang)
+        current_data = await get_triplet_values(qids, pid=["P31", "P279"], lang=lang)
 
         for qid in qids:
             if qid not in current_data:
                 continue
 
-            instanceof = [c['values'] \
-                          for c in current_data[qid]['claims'] \
-                            if c['PID'] == 'P31']
-            instanceof = [v['value'] for v in instanceof[0]] if instanceof else []
+            instanceof = [c["values"] for c in current_data[qid]["claims"] if c["PID"] == "P31"]
+            instanceof = [v["value"] for v in instanceof[0]] if instanceof else []
 
-            subclassof = [c['values'] \
-                          for c in current_data[qid]['claims'] \
-                            if c['PID'] == 'P279']
-            subclassof = [v['value'] for v in subclassof[0]] if subclassof else []
+            subclassof = [c["values"] for c in current_data[qid]["claims"] if c["PID"] == "P279"]
+            subclassof = [v["value"] for v in subclassof[0]] if subclassof else []
 
-            instanceof_qids = [v.get('QID', v.get('PID')) for v in instanceof]
-            subclassof_qids = [v.get('QID', v.get('PID')) for v in subclassof]
+            instanceof_qids = [v.get("QID", v.get("PID")) for v in instanceof]
+            subclassof_qids = [v.get("QID", v.get("PID")) for v in subclassof]
 
-            hierarchical_data[qid] = {
-                'instanceof': instanceof_qids,
-                'subclassof': subclassof_qids
-            }
+            hierarchical_data[qid] = {"instanceof": instanceof_qids, "subclassof": subclassof_qids}
 
-            new_qids = new_qids | \
-                set(instanceof_qids) | \
-                set(subclassof_qids)
+            new_qids = new_qids | set(instanceof_qids) | set(subclassof_qids)
 
             for v in instanceof + subclassof:
-                if 'QID' in v:
-                    label_data[v['QID']] = v.get('label', '')
-                elif 'PID' in v:
-                    label_data[v['PID']] = v.get('label', '')
-            label_data[qid] = current_data[qid].get('label', '')
+                if "QID" in v:
+                    label_data[v["QID"]] = v.get("label", "")
+                elif "PID" in v:
+                    label_data[v["PID"]] = v.get("label", "")
+            label_data[qid] = current_data[qid].get("label", "")
 
         qids = new_qids - set(hierarchical_data.keys()) - set({None})
         level += 1
@@ -405,53 +403,48 @@ async def get_hierarchy_data(qid: str,
     qids = list(hierarchical_data.keys())
     for qid, label in label_data.items():
         if qid in hierarchical_data:
-            hierarchical_data[qid]['label'] = label
+            hierarchical_data[qid]["label"] = label
 
     return hierarchical_data
 
+
 def hierarchy_to_json(qid, data, level=5):
+    """Convert hierarchy data to a nested JSON-serializable structure."""
     if level <= 0:
         return f"{data[qid]['label']} ({qid})"
 
     return {
         f"{data[qid]['label']} ({qid})": {
             "instance of (P31)": [
-                hierarchy_to_json(i_qid, data, level-1) \
-                    for i_qid in data[qid]['instanceof'] \
-                        if (i_qid in data)
+                hierarchy_to_json(i_qid, data, level - 1) for i_qid in data[qid]["instanceof"] if (i_qid in data)
             ],
             "subclass of (P279)": [
-                hierarchy_to_json(i_qid, data, level-1) \
-                    for i_qid in data[qid]['subclassof'] \
-                        if (i_qid in data)
-            ]
+                hierarchy_to_json(i_qid, data, level - 1) for i_qid in data[qid]["subclassof"] if (i_qid in data)
+            ],
         }
     }
 
+
 def stringify(value) -> str:
+    """Convert structured value objects into a readable string representation."""
     if isinstance(value, dict):
-        if 'values' in value:
-            return ", ".join(
-                [stringify(v.get('value', {})) \
-                    for v in value['values']]
-            )
-        if 'value' in value:
-            return stringify(value['value'])
-        if 'string' in value:
-            return value['string']
-        if 'QID' in value:
+        if "values" in value:
+            return ", ".join([stringify(v.get("value", {})) for v in value["values"]])
+        if "value" in value:
+            return stringify(value["value"])
+        if "string" in value:
+            return value["string"]
+        if "QID" in value:
             return f"{value.get('label')} ({value.get('QID')})"
-        if 'PID' in value:
+        if "PID" in value:
             return f"{value.get('label')} ({value.get('PID')})"
-        if 'amount' in value:
+        if "amount" in value:
             return f"{value.get('amount')} {value.get('unit', '')}".strip()
     return str(value)
 
-def triplet_values_to_string(entity_id: str,
-                             property_id: str,
-                             entity: dict) -> str:
-    """
-    Converts triplet values of a Wikidata statement into a human-readable string format.
+
+def triplet_values_to_string(entity_id: str, property_id: str, entity: dict) -> str:
+    """Converts triplet values of a Wikidata statement into a human-readable string format.
 
     Args:
         entity_id (str): The Wikidata entity ID (QID).
@@ -480,7 +473,7 @@ def triplet_values_to_string(entity_id: str,
 
             qualifiers = claim_value.get("qualifiers", [])
             if qualifiers:
-                output += f"  Qualifier:\n"
+                output += "  Qualifier:\n"
                 for qualifier in qualifiers:
                     output += f"    - {qualifier['property_label']} ({qualifier['PID']}): "
                     output += stringify(qualifier)
