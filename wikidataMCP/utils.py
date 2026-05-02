@@ -13,8 +13,6 @@ WD_API_URI = os.environ.get("WD_API_URI", "https://www.wikidata.org/w/api.php")
 WD_QUERY_URI = os.environ.get("WD_QUERY_URI", "https://query.wikidata.org/sparql")
 USER_AGENT = os.environ.get("USER_AGENT", "Wikidata MCP Client (embedding@wikimedia.de)")
 
-REQUEST_TIMEOUT_SECONDS = float(os.environ.get("REQUEST_TIMEOUT_SECONDS", "15"))
-
 SESSION = requests.Session()
 adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20)
 SESSION.mount("http://", adapter)
@@ -50,7 +48,6 @@ async def keywordsearch(query: str, type: str = "item", limit: int = 10, lang: s
         WD_API_URI,
         params=params,
         headers={"User-Agent": f"{USER_AGENT} ({user_agent})"},
-        timeout=REQUEST_TIMEOUT_SECONDS,
     )
     response.raise_for_status()
 
@@ -85,7 +82,6 @@ def vectorsearch_verify_apikey(x_api_key: str) -> bool:
                 "x-api-secret": x_api_key,
                 "User-Agent": USER_AGENT,
             },
-            timeout=REQUEST_TIMEOUT_SECONDS,
         )
         return response.status_code != 401
     except Exception:
@@ -120,7 +116,6 @@ async def vectorsearch(
             "k": limit,
         },
         headers={"x-api-secret": x_api_key, "User-Agent": f"{USER_AGENT} ({user_agent})"},
-        timeout=REQUEST_TIMEOUT_SECONDS,
     )
     response.raise_for_status()
 
@@ -150,8 +145,7 @@ async def execute_sparql(sparql_query: str, K: int = 10, user_agent="") -> pd.Da
             "query": sparql_query,
             "format": "json",
         },
-        headers={"User-Agent": f"{USER_AGENT} ({user_agent})"},
-        timeout=REQUEST_TIMEOUT_SECONDS,
+        headers={"User-Agent": f"{USER_AGENT} ({user_agent})"}
     )
 
     if result.status_code == 400:
@@ -217,7 +211,6 @@ async def get_entities_labels_and_descriptions(ids, lang="en") -> dict:
             WD_API_URI,
             params=params,
             headers={"User-Agent": USER_AGENT},
-            timeout=REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
         chunk_data = response.json().get("entities", {})
@@ -273,7 +266,6 @@ async def get_entities_triplets(
         TEXTIFER_URI,
         params=params,
         headers={"User-Agent": f"{USER_AGENT} ({user_agent})"},
-        timeout=REQUEST_TIMEOUT_SECONDS,
     )
     response.raise_for_status()
     info = response.json()
@@ -306,7 +298,6 @@ async def get_claims(qid: str, pid: str, lang: str = "en") -> dict:
         WD_API_URI,
         params=params,
         headers={"User-Agent": USER_AGENT},
-        timeout=REQUEST_TIMEOUT_SECONDS,
     )
     response.raise_for_status()
     entities_data = response.json().get("claims", {})
@@ -366,7 +357,6 @@ async def get_triplet_values(
         TEXTIFER_URI,
         params=params,
         headers={"User-Agent": f"{USER_AGENT} ({user_agent})"},
-        timeout=REQUEST_TIMEOUT_SECONDS,
     )
     response.raise_for_status()
     info = response.json()
