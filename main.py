@@ -148,6 +148,7 @@ async def home(request: Request):
             user_agent=request.headers.get("user-agent", "unknown")[:255],
         )
 
+
 @app.get("/health", tags=["meta"])
 async def health():
     """Return a lightweight service health response."""

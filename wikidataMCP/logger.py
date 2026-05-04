@@ -20,10 +20,6 @@ from sqlalchemy import (
 from sqlalchemy.dialects.mysql import JSON
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-"""
-MySQL database setup for storing Wikidata labels in all languages.
-"""
-
 DB_HOST = os.environ["DB_HOST"]
 DB_NAME = os.environ["DB_NAME"]
 DB_USER = os.environ["DB_USER"]
@@ -75,15 +71,15 @@ class Logger(Base):
         toolname,
         start_time,
         parameters=None,
-        user_agent='',
+        user_agent="",
     ):
         """Add a new request log entry.
 
         Args:
-            request (_type_): The incoming request object.
-            start_time (_type_): The time when the request was received.
-            toolname (str, optional): The logged tool name. Use "/" for home page views.
+            toolname (str): Logged tool name. Use "/" for home page views.
+            start_time (float): Request start timestamp from `time.time()`.
             parameters (dict | None, optional): Request parameters. Defaults to None.
+            user_agent (str, optional): Caller-provided user agent string.
         """
         with Session() as session:
             try:
@@ -109,19 +105,17 @@ class Logger(Base):
 
     @staticmethod
     def add_request_async(**kwargs):
+        """Run the Logger's add_request in a separate thread."""
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(asyncio.to_thread(
-                Logger.add_request,
-                **kwargs
-            ))
-        except:
+            loop.create_task(asyncio.to_thread(Logger.add_request, **kwargs))
+        except Exception:
             # no running loop (safe fallback)
             Logger.add_request(**kwargs)
 
     @staticmethod
     def redact_old_requests(days: int = 90, batch_size: int = 1000):
-        """Redacts old request logs.
+        """Redact old request logs.
 
         Args:
             days (int, optional): The age of logs to redact in days. Defaults to 90.
@@ -161,5 +155,6 @@ def initialize_database():
     except Exception as e:
         print(f"Error while initializing labels database: {e}")
         return False
+
 
 initialize_database()

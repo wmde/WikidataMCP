@@ -19,8 +19,8 @@ SESSION.mount("http://", adapter)
 SESSION.mount("https://", adapter)
 
 
-async def keywordsearch(query: str, type: str = "item", limit: int = 10, lang: str = "en", user_agent="") -> list:
-    """Searches for Wikidata items or properties that match the input text.
+async def keywordsearch(query: str, type: str = "item", limit: int = 10, lang: str = "en", user_agent="") -> dict:
+    """Search Wikidata items or properties that match the input text.
 
     Args:
         query (str): The text to search for in Wikidata items or properties.
@@ -33,7 +33,7 @@ async def keywordsearch(query: str, type: str = "item", limit: int = 10, lang: s
             the service User-Agent. Defaults to "".
 
     Returns:
-        list: Matching entities with identifier, label, and description fields.
+        dict: Mapping from entity ID to label/description fields.
     """
     params = {
         "action": "wbsearchentities",
@@ -63,16 +63,11 @@ async def keywordsearch(query: str, type: str = "item", limit: int = 10, lang: s
     return item_dict
 
 
-async def vectorsearch(query: str,
-                       type: str = "item",
-                       limit: int = 10,
-                       lang: str = 'en',
-                       user_agent = '') -> list:
-    """Searches for Wikidata items or properties similar to the input text using a vector database.
+async def vectorsearch(query: str, type: str = "item", limit: int = 10, lang: str = "en", user_agent="") -> dict:
+    """Search Wikidata items or properties similar to input text using vector search.
 
     Args:
         query (str): The text to search for in Wikidata items or properties.
-        x_api_key (str): API key for accessing the vector database.
         type (str, optional): Type of entity to search for. One of
             "item" or "property". Defaults to "item".
         limit (int, optional): Maximum number of results to return. Defaults to 10.
@@ -82,7 +77,7 @@ async def vectorsearch(query: str,
             the service User-Agent. Defaults to "".
 
     Returns:
-        list: Matching entities with identifier, label, and description fields.
+        dict: Mapping from entity ID to label/description fields.
     """
     id_name = "QID" if type == "item" else "PID"
 
@@ -92,9 +87,7 @@ async def vectorsearch(query: str,
             "query": query,
             "k": limit,
         },
-        headers={
-            "User-Agent": f"{USER_AGENT} ({user_agent})"
-        },
+        headers={"User-Agent": f"{USER_AGENT} ({user_agent})"},
     )
     response.raise_for_status()
 
@@ -124,7 +117,7 @@ async def execute_sparql(sparql_query: str, K: int = 10, user_agent="") -> pd.Da
             "query": sparql_query,
             "format": "json",
         },
-        headers={"User-Agent": f"{USER_AGENT} ({user_agent})"}
+        headers={"User-Agent": f"{USER_AGENT} ({user_agent})"},
     )
 
     if result.status_code == 400:
@@ -160,14 +153,14 @@ def get_lang_specific(data, langs=["en", "mul"]) -> str:
 
 
 async def get_entities_labels_and_descriptions(ids, lang="en") -> dict:
-    """Fetches labels and descriptions for a list of Wikidata entity IDs.
+    """Fetch labels and descriptions for a list of Wikidata entity IDs.
 
     Args:
         ids (list[str]): List of Wikidata entity IDs (QIDs or PIDs).
         lang (str, optional): Language code available on Wikidata. Default to en.
 
     Returns:
-        dict: A dictionary mapping entity IDs to WikidataEntity objects with labels and descriptions.
+        dict: Mapping of entity IDs to label/description fields.
     """
     if not ids:
         return {}
@@ -213,7 +206,7 @@ async def get_entities_triplets(
     lang: str = "en",
     user_agent="",
 ) -> dict:
-    """Fetches triplet representations for claims of a list of Wikidata entity IDs.
+    """Fetch triplet-formatted statements for a list of Wikidata entity IDs.
 
     Args:
         ids (list[str]): A list of Wikidata entity IDs to fetch triplet data for.
@@ -252,19 +245,20 @@ async def get_entities_triplets(
     return info
 
 
-async def get_claims(qid: str, pid: str, lang: str = "en") -> dict:
-    """Fetches claim values for a given Wikidata QID and PID.
+async def get_claims(qid: str, pid: str, lang: str = "en") -> list:
+    """Fetch claim values for a given Wikidata QID and PID.
 
     Args:
         qid (str): The Wikidata QID to fetch claim data for.
         pid (str): The Wikidata PID to fetch claim data for.
-        lang (str, optional): Language code available on Wikidata. Default to en.
+        lang (str, optional): Reserved for API parity; not used by `wbgetclaims`.
+            Default to "en".
 
     Returns:
-        dict: A dictionary where keys are entity IDs and values are their RDF triplet representations as strings.
+        list: Claim values extracted from `datavalue.value`.
     """
     if not qid or not pid:
-        return {}
+        return []
 
     params = {
         "action": "wbgetclaims",
@@ -300,7 +294,7 @@ async def get_triplet_values(
     lang: str = "en",
     user_agent="",
 ) -> dict:
-    """Fetches triplet representations for claims of a list of Wikidata entity IDs.
+    """Fetch structured triplet values for claims on Wikidata entities.
 
     Args:
         ids (list[str]): A list of Wikidata entity IDs to fetch triplet data for.
@@ -344,7 +338,7 @@ async def get_triplet_values(
 
 
 async def get_hierarchy_data(qid: str, max_depth: int = 5, lang: str = "en") -> dict:
-    """Fetches hierarchical data for a given Wikidata QID.
+    """Fetch hierarchy data for a Wikidata entity using P31 and P279 links.
 
     Args:
         qid (str): The Wikidata QID to fetch hierarchical data for.
@@ -400,7 +394,16 @@ async def get_hierarchy_data(qid: str, max_depth: int = 5, lang: str = "en") -> 
 
 
 def hierarchy_to_json(qid, data, level=5):
-    """Convert hierarchy data to a nested JSON-serializable structure."""
+    """Convert hierarchy graph data into a nested JSON-serializable structure.
+
+    Args:
+        qid: Root entity ID to render.
+        data: Hierarchy mapping produced by `get_hierarchy_data`.
+        level: Maximum recursion depth.
+
+    Returns:
+        dict | str: Nested hierarchy object, or a terminal label string at depth 0.
+    """
     if level <= 0:
         return f"{data[qid]['label']} ({qid})"
 
@@ -434,8 +437,8 @@ def stringify(value) -> str:
     return str(value)
 
 
-def triplet_values_to_string(entity_id: str, property_id: str, entity: dict) -> str:
-    """Converts triplet values of a Wikidata statement into a human-readable string format.
+def triplet_values_to_string(entity_id: str, property_id: str, entity: dict) -> str | None:
+    """Convert statement triplet values into a human-readable string.
 
     Args:
         entity_id (str): The Wikidata entity ID (QID).
@@ -443,7 +446,7 @@ def triplet_values_to_string(entity_id: str, property_id: str, entity: dict) -> 
         entity (dict): The triplet data of the entity.
 
     Returns:
-        str: A formatted string representing the triplet values, qualifiers, and references.
+        str | None: Formatted statement text, or None if the entity has no claims.
     """
     claims = entity.get("claims")
     if not claims:

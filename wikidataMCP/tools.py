@@ -444,21 +444,22 @@ async def get_instance_and_subclass_hierarchy(entity_id: str, max_depth: int = 5
         lang: Language code for labels and descriptions (default: 'en').
 
     Returns:
-        JSON-formatted hierarchical data showing the entity's placement in the ontology.
+        JSON-formatted hierarchy with keys `instance of (P31)` and
+        `subclass of (P279)`.
 
     Example:
         >>> get_instance_and_subclass_hierarchy("Q42", max_depth=2)
         {
           "Douglas Adams (Q42)": {
-            "instanceof": [
+            "instance of (P31)": [
               {
                 "human (Q5)": {
-                    "instanceof": ["biological organism (Q215627)"],
-                    "subclassof": ["mammal (Q729)"]
+                  "instanceof": ["biological organism (Q215627)"],
+                  "subclassof": ["mammal (Q729)"]
                 }
               }
             ],
-            "subclassof": []
+            "subclass of (P279)": []
           }
         }
     """
@@ -571,7 +572,7 @@ async def execute_sparql(sparql: str, K: int = 10) -> str:
             )
 
         try:
-            return result.to_csv(sep=';', index=True, header=True)
+            return result.to_csv(sep=";", index=True, header=True)
         except Exception:
             return "Unexpected server error while processing the request."
     finally:
