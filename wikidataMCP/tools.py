@@ -469,9 +469,11 @@ async def get_instance_and_subclass_hierarchy(entity_id: str, max_depth: int = 5
     try:
         if not entity_id.strip():
             return "Entity ID cannot be empty."
+        if max_depth < 0:
+            return "max_depth must be greater than or equal to 0."
 
         try:
-            result = await utils.get_hierarchy_data(entity_id, max_depth, lang=lang)
+            result = await utils.get_hierarchy_data(entity_id, max_depth, lang=lang, user_agent=user_agent)
         except requests.RequestException:
             return "Wikidata is currently unavailable. Please retry shortly."
         except Exception:
@@ -550,6 +552,8 @@ async def execute_sparql(sparql: str, K: int = 10) -> str:
     try:
         if not sparql.strip():
             return "SPARQL query cannot be empty."
+        if K <= 0:
+            return "K must be greater than 0."
 
         try:
             result = await utils.execute_sparql(

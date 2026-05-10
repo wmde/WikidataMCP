@@ -94,7 +94,7 @@ async def vectorsearch(query: str, type: str = "item", limit: int = 10, lang: st
     vectordb_result = response.json()
 
     ids = [x[id_name] for x in vectordb_result]
-    entities_dict = await get_entities_labels_and_descriptions(ids, lang=lang)
+    entities_dict = await get_entities_labels_and_descriptions(ids, lang=lang, user_agent=user_agent)
     return entities_dict
 
 
@@ -152,12 +152,14 @@ def get_lang_specific(data, langs=["en", "mul"]) -> str:
     return ""
 
 
-async def get_entities_labels_and_descriptions(ids, lang="en") -> dict:
+async def get_entities_labels_and_descriptions(ids, lang="en", user_agent="") -> dict:
     """Fetch labels and descriptions for a list of Wikidata entity IDs.
 
     Args:
         ids (list[str]): List of Wikidata entity IDs (QIDs or PIDs).
         lang (str, optional): Language code available on Wikidata. Default to en.
+        user_agent (str, optional): Caller-provided suffix appended to
+            the service User-Agent. Defaults to "".
 
     Returns:
         dict: Mapping of entity IDs to label/description fields.
@@ -182,7 +184,7 @@ async def get_entities_labels_and_descriptions(ids, lang="en") -> dict:
         response = SESSION.get(
             WD_API_URI,
             params=params,
-            headers={"User-Agent": USER_AGENT},
+            headers={"User-Agent": f"{USER_AGENT} ({user_agent})"},
         )
         response.raise_for_status()
         chunk_data = response.json().get("entities", {})
@@ -245,7 +247,7 @@ async def get_entities_triplets(
     return info
 
 
-async def get_claims(qid: str, pid: str, lang: str = "en") -> list:
+async def get_claims(qid: str, pid: str, lang: str = "en", user_agent="") -> list:
     """Fetch claim values for a given Wikidata QID and PID.
 
     Args:
@@ -253,6 +255,8 @@ async def get_claims(qid: str, pid: str, lang: str = "en") -> list:
         pid (str): The Wikidata PID to fetch claim data for.
         lang (str, optional): Reserved for API parity; not used by `wbgetclaims`.
             Default to "en".
+        user_agent (str, optional): Caller-provided suffix appended to
+            the service User-Agent. Defaults to "".
 
     Returns:
         list: Claim values extracted from `datavalue.value`.
@@ -270,7 +274,7 @@ async def get_claims(qid: str, pid: str, lang: str = "en") -> list:
     response = SESSION.get(
         WD_API_URI,
         params=params,
-        headers={"User-Agent": USER_AGENT},
+        headers={"User-Agent": f"{USER_AGENT} ({user_agent})"},
     )
     response.raise_for_status()
     entities_data = response.json().get("claims", {})
@@ -337,13 +341,15 @@ async def get_triplet_values(
     return info
 
 
-async def get_hierarchy_data(qid: str, max_depth: int = 5, lang: str = "en") -> dict:
+async def get_hierarchy_data(qid: str, max_depth: int = 5, lang: str = "en", user_agent="") -> dict:
     """Fetch hierarchy data for a Wikidata entity using P31 and P279 links.
 
     Args:
         qid (str): The Wikidata QID to fetch hierarchical data for.
         max_depth (int, optional): Maximum depth of the hierarchy to retrieve. Defaults to 5.
         lang (str, optional): Language code available on Wikidata. Default to en.
+        user_agent (str, optional): Caller-provided suffix appended to
+            the service User-Agent. Defaults to "".
 
     Returns:
         dict: A dictionary representing the hierarchical data.
@@ -356,17 +362,25 @@ async def get_hierarchy_data(qid: str, max_depth: int = 5, lang: str = "en") -> 
     while qids and level <= max_depth:
         new_qids = set()
 
-        current_data = await get_triplet_values(qids, pid=["P31", "P279"], lang=lang)
+        current_data = await get_triplet_values(qids, pid=["P31", "P279"], lang=lang, user_agent=user_agent)
 
         for qid in qids:
             if qid not in current_data:
                 continue
 
-            instanceof = [c["values"] for c in current_data[qid]["claims"] if c["PID"] == "P31"]
-            instanceof = [v["value"] for v in instanceof[0]] if instanceof else []
+            instanceof = [
+                value["value"]
+                for claim in current_data[qid]["claims"]
+                if claim["PID"] == "P31"
+                for value in claim.get("values", [])
+            ]
 
-            subclassof = [c["values"] for c in current_data[qid]["claims"] if c["PID"] == "P279"]
-            subclassof = [v["value"] for v in subclassof[0]] if subclassof else []
+            subclassof = [
+                value["value"]
+                for claim in current_data[qid]["claims"]
+                if claim["PID"] == "P279"
+                for value in claim.get("values", [])
+            ]
 
             instanceof_qids = [v.get("QID", v.get("PID")) for v in instanceof]
             subclassof_qids = [v.get("QID", v.get("PID")) for v in subclassof]
