@@ -11,8 +11,10 @@ dependencies = [
     "jinja2>=3.1.6",
     "markdown2>=2.5.4",
     "pandas>=2.3.0",
+    "pymysql>=1.1.2",
     "requests>=2.32.4",
     "slowapi>=0.1.9",
+    "sqlalchemy>=2.0.49",
     "starlette>=0.47.2",
     "uvicorn>=0.35.0",
 ]

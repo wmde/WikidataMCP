@@ -1,16 +1,34 @@
 services:
+  db:
+    container_name: mcpDB
+    image: mariadb:10.11
+    environment:
+      MARIADB_DATABASE: ${DB_NAME}
+      MARIADB_USER: ${DB_USER}
+      MARIADB_PASSWORD: ${DB_PASS}
+      MARIADB_ROOT_USER: ${DB_USER}
+      MARIADB_ROOT_PASSWORD: ${DB_PASS}
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -u root -p$${MARIADB_ROOT_PASSWORD} --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
   wikidatamcp:
     build: .
-    env_file:
-      - .env
     environment:
-      - WD_VECTORDB_API_SECRET
-      - LANGUAGE
-      - VECTOR_SEARCH_URI
-      - TEXTIFER_URI
-      - WD_API_URI
-      - WD_QUERY_URI
-      - USER_AGENT
+      LANGUAGE: ${LANGUAGE}
+      VECTOR_SEARCH_URI: ${VECTOR_SEARCH_URI}
+      TEXTIFER_URI: ${TEXTIFER_URI}
+      WD_API_URI: ${WD_API_URI}
+      WD_QUERY_URI: ${WD_QUERY_URI}
+      USER_AGENT: ${USER_AGENT}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASS: ${DB_PASS}
+      DB_HOST: mcpDB
     container_name: wikidatamcp
     extra_hosts:
       - "host.docker.internal:host-gateway"

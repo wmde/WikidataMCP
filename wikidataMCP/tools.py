@@ -2,12 +2,15 @@
 
 import json
 import os
+import time
 
 import requests
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_headers
 
 from wikidataMCP import utils
+
+from .logger import Logger
 
 SERVER_INSTRUCTIONS = """
 Explore Wikidata without assumptions.
@@ -33,8 +36,7 @@ Execution policy:
 
 mcp = FastMCP("Wikidata MCP", instructions=SERVER_INSTRUCTIONS)
 
-WD_VECTORDB_API_SECRET = os.environ.get("WD_VECTORDB_API_SECRET")
-VECTOR_ENABLED = utils.vectorsearch_verify_apikey(WD_VECTORDB_API_SECRET)
+VECTOR_ENABLED = os.environ.get("VECTOR_ENABLED", "true").lower() == "true"
 
 
 def _current_user_agent() -> str:
@@ -55,7 +57,7 @@ def _format_search_results(results: dict, entity_type: str) -> str:
     return "\n".join(text_val)
 
 
-# Enable vector search if the API key is set
+# Enable vector search
 if VECTOR_ENABLED:
 
     @mcp.tool()
@@ -78,41 +80,51 @@ if VECTOR_ENABLED:
             Q23163: A Scientific Romance — 1997 novel by Ronald Wright
             Q627333: The Time Machine — 1895 dystopian science fiction novella by H. G. Wells
         """
-        if not query.strip():
-            return "Query cannot be empty."
-
+        start_time = time.time()
         user_agent = _current_user_agent()
+
         try:
-            results = await utils.vectorsearch(
-                query,
-                WD_VECTORDB_API_SECRET,
-                lang=lang,
+            if not query.strip():
+                return "Query cannot be empty."
+
+            try:
+                results = await utils.vectorsearch(
+                    query,
+                    lang=lang,
+                    user_agent=user_agent,
+                )
+            except requests.RequestException:
+                try:
+                    results = await utils.keywordsearch(
+                        query,
+                        type="item",
+                        lang=lang,
+                        user_agent=user_agent,
+                    )
+                except requests.RequestException:
+                    return "Wikidata is currently unavailable. Please retry shortly."
+            except Exception:
+                try:
+                    results = await utils.keywordsearch(
+                        query,
+                        type="item",
+                        lang=lang,
+                        user_agent=user_agent,
+                    )
+                except requests.RequestException:
+                    return "Wikidata is currently unavailable. Please retry shortly."
+                except Exception:
+                    return "Unexpected server error while processing the request."
+
+            return _format_search_results(results, "item")
+
+        finally:
+            Logger.add_request_async(
+                toolname="search_items",
+                start_time=start_time,
+                parameters={"query": query, "lang": lang},
                 user_agent=user_agent,
             )
-        except requests.RequestException:
-            try:
-                results = await utils.keywordsearch(
-                    query,
-                    type="item",
-                    lang=lang,
-                    user_agent=user_agent,
-                )
-            except requests.RequestException:
-                return "Wikidata is currently unavailable. Please retry shortly."
-        except Exception:
-            try:
-                results = await utils.keywordsearch(
-                    query,
-                    type="item",
-                    lang=lang,
-                    user_agent=user_agent,
-                )
-            except requests.RequestException:
-                return "Wikidata is currently unavailable. Please retry shortly."
-            except Exception:
-                return "Unexpected server error while processing the request."
-
-        return _format_search_results(results, "item")
 
     @mcp.tool()
     async def search_properties(query: str, lang: str = "en") -> str:
@@ -134,48 +146,53 @@ if VECTOR_ENABLED:
             P551: residence — the place where the person is or has been, resident
             P276: location — location of the object, structure or event
         """
-        if not query.strip():
-            return "Query cannot be empty."
-
+        start_time = time.time()
         user_agent = _current_user_agent()
+
         try:
-            results = await utils.vectorsearch(
-                query,
-                WD_VECTORDB_API_SECRET,
-                type="property",
-                lang=lang,
+            if not query.strip():
+                return "Query cannot be empty."
+
+            try:
+                results = await utils.vectorsearch(
+                    query,
+                    type="property",
+                    lang=lang,
+                    user_agent=user_agent,
+                )
+            except requests.RequestException:
+                try:
+                    results = await utils.keywordsearch(
+                        query,
+                        type="property",
+                        lang=lang,
+                        user_agent=user_agent,
+                    )
+                except requests.RequestException:
+                    return "Wikidata is currently unavailable. Please retry shortly."
+            except Exception:
+                try:
+                    results = await utils.keywordsearch(
+                        query,
+                        type="property",
+                        lang=lang,
+                        user_agent=user_agent,
+                    )
+                except requests.RequestException:
+                    return "Wikidata is currently unavailable. Please retry shortly."
+                except Exception:
+                    return "Unexpected server error while processing the request."
+
+            return _format_search_results(results, "property")
+        finally:
+            Logger.add_request_async(
+                toolname="search_properties",
+                start_time=start_time,
+                parameters={"query": query, "lang": lang},
                 user_agent=user_agent,
             )
-        except requests.RequestException:
-            try:
-                results = await utils.keywordsearch(
-                    query,
-                    type="property",
-                    lang=lang,
-                    user_agent=user_agent,
-                )
-            except requests.RequestException:
-                return "Wikidata is currently unavailable. Please retry shortly."
-        except Exception:
-            try:
-                results = await utils.keywordsearch(
-                    query,
-                    type="property",
-                    lang=lang,
-                    user_agent=user_agent,
-                )
-            except requests.RequestException:
-                return "Wikidata is currently unavailable. Please retry shortly."
-            except Exception:
-                return "Unexpected server error while processing the request."
-
-        return _format_search_results(results, "property")
 
 else:
-    print(
-        "WD_VECTORDB_API_SECRET not set: \
-        vector search tools are not registered."
-    )
 
     @mcp.tool()
     async def search_items(query: str, lang: str = "en") -> str:
@@ -197,22 +214,33 @@ else:
             Q42: Douglas Adams — English science fiction writer and humorist
             Q28421831: Douglas Adams — American environmental engineer
         """
-        if not query.strip():
-            return "Query cannot be empty."
+        start_time = time.time()
+        user_agent = _current_user_agent()
 
         try:
-            results = await utils.keywordsearch(
-                query,
-                type="item",
-                lang=lang,
-                user_agent=_current_user_agent(),
-            )
-        except requests.RequestException:
-            return "Wikidata is currently unavailable. Please retry shortly."
-        except Exception:
-            return "Unexpected server error while processing the request."
+            if not query.strip():
+                return "Query cannot be empty."
 
-        return _format_search_results(results, "item")
+            try:
+                results = await utils.keywordsearch(
+                    query,
+                    type="item",
+                    lang=lang,
+                    user_agent=user_agent,
+                )
+            except requests.RequestException:
+                return "Wikidata is currently unavailable. Please retry shortly."
+            except Exception:
+                return "Unexpected server error while processing the request."
+
+            return _format_search_results(results, "item")
+        finally:
+            Logger.add_request_async(
+                toolname="search_items",
+                start_time=start_time,
+                parameters={"query": query, "lang": lang},
+                user_agent=user_agent,
+            )
 
     @mcp.tool()
     async def search_properties(query: str, lang: str = "en") -> str:
@@ -234,22 +262,33 @@ else:
             P551: residence — the place where the person is or has been, resident
             P276: location — location of the object, structure or event
         """
-        if not query.strip():
-            return "Query cannot be empty."
+        start_time = time.time()
+        user_agent = _current_user_agent()
 
         try:
-            results = await utils.keywordsearch(
-                query,
-                type="property",
-                lang=lang,
-                user_agent=_current_user_agent(),
-            )
-        except requests.RequestException:
-            return "Wikidata is currently unavailable. Please retry shortly."
-        except Exception:
-            return "Unexpected server error while processing the request."
+            if not query.strip():
+                return "Query cannot be empty."
 
-        return _format_search_results(results, "property")
+            try:
+                results = await utils.keywordsearch(
+                    query,
+                    type="property",
+                    lang=lang,
+                    user_agent=user_agent,
+                )
+            except requests.RequestException:
+                return "Wikidata is currently unavailable. Please retry shortly."
+            except Exception:
+                return "Unexpected server error while processing the request."
+
+            return _format_search_results(results, "property")
+        finally:
+            Logger.add_request_async(
+                toolname="search_properties",
+                start_time=start_time,
+                parameters={"query": query, "lang": lang},
+                user_agent=user_agent,
+            )
 
 
 @mcp.tool()
@@ -274,27 +313,42 @@ async def get_statements(entity_id: str, include_external_ids: bool = False, lan
         Douglas Adams (Q42): instance of (P31): human (Q5)
         Douglas Adams (Q42): occupation (P106): novelist (Q6625963)
     """
-    if not entity_id.strip():
-        return "Entity ID cannot be empty."
+    start_time = time.time()
+    user_agent = _current_user_agent()
 
     try:
-        result = await utils.get_entities_triplets(
-            [entity_id],
-            external_ids=include_external_ids,
-            all_ranks=False,
-            qualifiers=False,
-            lang=lang,
-            user_agent=_current_user_agent(),
+        if not entity_id.strip():
+            return "Entity ID cannot be empty."
+
+        try:
+            result = await utils.get_entities_triplets(
+                [entity_id],
+                external_ids=include_external_ids,
+                all_ranks=False,
+                qualifiers=False,
+                lang=lang,
+                user_agent=user_agent,
+            )
+        except requests.RequestException:
+            return "Wikidata is currently unavailable. Please retry shortly."
+        except Exception:
+            return "Unexpected server error while processing the request."
+
+        if not result:
+            return f"Entity {entity_id} not found"
+
+        return result.get(entity_id, f"Entity {entity_id} not found")
+    finally:
+        Logger.add_request_async(
+            toolname="get_statements",
+            start_time=start_time,
+            parameters={
+                "entity_id": entity_id,
+                "include_external_ids": include_external_ids,
+                "lang": lang,
+            },
+            user_agent=user_agent,
         )
-    except requests.RequestException:
-        return "Wikidata is currently unavailable. Please retry shortly."
-    except Exception:
-        return "Unexpected server error while processing the request."
-
-    if not result:
-        return f"Entity {entity_id} not found"
-
-    return result.get(entity_id, f"Entity {entity_id} not found")
 
 
 @mcp.tool()
@@ -328,38 +382,53 @@ async def get_statement_values(entity_id: str, property_id: str, lang: str = "en
             - stated in (P248): Who's Who (Q2567271)
             - Who's Who UK ID (P4789): U4994
     """
-    if not entity_id.strip():
-        return "Entity ID cannot be empty."
-    if not property_id.strip():
-        return "Property ID cannot be empty."
+    start_time = time.time()
+    user_agent = _current_user_agent()
 
     try:
-        result = await utils.get_triplet_values(
-            [entity_id],
-            pid=[property_id],
-            external_ids=True,
-            references=True,
-            all_ranks=True,
-            qualifiers=True,
-            lang=lang,
-            user_agent=_current_user_agent(),
+        if not entity_id.strip():
+            return "Entity ID cannot be empty."
+        if not property_id.strip():
+            return "Property ID cannot be empty."
+
+        try:
+            result = await utils.get_triplet_values(
+                [entity_id],
+                pid=[property_id],
+                external_ids=True,
+                references=True,
+                all_ranks=True,
+                qualifiers=True,
+                lang=lang,
+                user_agent=user_agent,
+            )
+        except requests.RequestException:
+            return "Wikidata is currently unavailable. Please retry shortly."
+        except Exception:
+            return "Unexpected server error while processing the request."
+
+        if not result:
+            return f"Entity {entity_id} not found"
+
+        entity = result.get(entity_id)
+        if not entity:
+            return f"Entity {entity_id} not found"
+
+        text = utils.triplet_values_to_string(entity_id, property_id, entity)
+        if not text:
+            return f"No statement found for {entity_id} with property {property_id}"
+        return text
+    finally:
+        Logger.add_request_async(
+            toolname="get_statement_values",
+            start_time=start_time,
+            parameters={
+                "entity_id": entity_id,
+                "property_id": property_id,
+                "lang": lang,
+            },
+            user_agent=user_agent,
         )
-    except requests.RequestException:
-        return "Wikidata is currently unavailable. Please retry shortly."
-    except Exception:
-        return "Unexpected server error while processing the request."
-
-    if not result:
-        return f"Entity {entity_id} not found"
-
-    entity = result.get(entity_id)
-    if not entity:
-        return f"Entity {entity_id} not found"
-
-    text = utils.triplet_values_to_string(entity_id, property_id, entity)
-    if not text:
-        return f"No statement found for {entity_id} with property {property_id}"
-    return text
 
 
 @mcp.tool()
@@ -375,42 +444,56 @@ async def get_instance_and_subclass_hierarchy(entity_id: str, max_depth: int = 5
         lang: Language code for labels and descriptions (default: 'en').
 
     Returns:
-        JSON-formatted hierarchical data showing the entity's placement in the ontology.
+        JSON-formatted hierarchy with keys `instance of (P31)` and
+        `subclass of (P279)`.
 
     Example:
         >>> get_instance_and_subclass_hierarchy("Q42", max_depth=2)
         {
           "Douglas Adams (Q42)": {
-            "instanceof": [
+            "instance of (P31)": [
               {
                 "human (Q5)": {
-                    "instanceof": ["biological organism (Q215627)"],
-                    "subclassof": ["mammal (Q729)"]
+                  "instanceof": ["biological organism (Q215627)"],
+                  "subclassof": ["mammal (Q729)"]
                 }
               }
             ],
-            "subclassof": []
+            "subclass of (P279)": []
           }
         }
     """
-    if not entity_id.strip():
-        return "Entity ID cannot be empty."
+    start_time = time.time()
+    user_agent = _current_user_agent()
 
     try:
-        result = await utils.get_hierarchy_data(entity_id, max_depth, lang=lang)
-    except requests.RequestException:
-        return "Wikidata is currently unavailable. Please retry shortly."
-    except Exception:
-        return "Unexpected server error while processing the request."
+        if not entity_id.strip():
+            return "Entity ID cannot be empty."
+        if max_depth < 0:
+            return "max_depth must be greater than or equal to 0."
 
-    if not result or entity_id not in result:
-        return f"Entity {entity_id} not found"
+        try:
+            result = await utils.get_hierarchy_data(entity_id, max_depth, lang=lang, user_agent=user_agent)
+        except requests.RequestException:
+            return "Wikidata is currently unavailable. Please retry shortly."
+        except Exception:
+            return "Unexpected server error while processing the request."
 
-    try:
-        result = utils.hierarchy_to_json(entity_id, result, level=max_depth)
-        return json.dumps(result, indent=2)
-    except Exception:
-        return "Unexpected server error while processing the request."
+        if not result or entity_id not in result:
+            return f"Entity {entity_id} not found"
+
+        try:
+            result = utils.hierarchy_to_json(entity_id, result, level=max_depth)
+            return json.dumps(result, indent=2)
+        except Exception:
+            return "Unexpected server error while processing the request."
+    finally:
+        Logger.add_request_async(
+            toolname="get_instance_and_subclass_hierarchy",
+            start_time=start_time,
+            parameters={"entity_id": entity_id, "max_depth": max_depth, "lang": lang},
+            user_agent=user_agent,
+        )
 
 
 @mcp.tool()
@@ -463,33 +546,46 @@ async def execute_sparql(sparql: str, K: int = 10) -> str:
         0;Q42
         1;Q820
     """
-    if not sparql.strip():
-        return "SPARQL query cannot be empty."
+    start_time = time.time()
+    user_agent = _current_user_agent()
 
     try:
-        result = await utils.execute_sparql(
-            sparql,
-            K=K,
-            user_agent=_current_user_agent(),
-        )
-    except ValueError as e:
-        return str(e)
-    except requests.RequestException:
-        return "Wikidata is currently unavailable. Please retry shortly."
-    except Exception:
-        return "Unexpected server error while processing the request."
+        if not sparql.strip():
+            return "SPARQL query cannot be empty."
+        if K <= 0:
+            return "K must be greater than 0."
 
-    if len(result) == 0:
-        return (
-            "SPARQL query returned no data.\n"
-            "Double-check the structure using `search_items`/`search_properties`, "
-            "`get_statements`, and `get_statement_values`, then refine and retry."
-        )
+        try:
+            result = await utils.execute_sparql(
+                sparql,
+                K=K,
+                user_agent=user_agent,
+            )
+        except ValueError as e:
+            return str(e)
+        except requests.RequestException:
+            return "Wikidata is currently unavailable. Please retry shortly."
+        except Exception:
+            return "Unexpected server error while processing the request."
 
-    try:
-        return result.to_csv(sep=";", index=True, header=True)
-    except Exception:
-        return "Unexpected server error while processing the request."
+        if len(result) == 0:
+            return (
+                "SPARQL query returned no data.\n"
+                "Double-check the structure using `search_items`/`search_properties`, "
+                "`get_statements`, and `get_statement_values`, then refine and retry."
+            )
+
+        try:
+            return result.to_csv(sep=";", index=True, header=True)
+        except Exception:
+            return "Unexpected server error while processing the request."
+    finally:
+        Logger.add_request_async(
+            toolname="execute_sparql",
+            start_time=start_time,
+            parameters={"sparql": sparql, "K": K},
+            user_agent=user_agent,
+        )
 
 
 @mcp.prompt
