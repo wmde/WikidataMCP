@@ -1,0 +1,9 @@
+{
+	"servers": {
+		"Wikidata": {
+			"url": "https://wd-mcp.wmcloud.org/mcp/",
+			"type": "http"
+		}
+	},
+	"inputs": []
+}

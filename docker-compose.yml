@@ -4,7 +4,6 @@ services:
     env_file:
       - .env
     environment:
-      - WD_VECTORDB_API_SECRET
       - LANGUAGE
       - VECTOR_SEARCH_URI
       - TEXTIFER_URI

@@ -1,7 +1,7 @@
 """FastMCP tool and prompt registrations for Wikidata access."""
 
 import json
-import os
+import traceback
 
 import requests
 from fastmcp import FastMCP
@@ -33,9 +33,6 @@ Execution policy:
 
 mcp = FastMCP("Wikidata MCP", instructions=SERVER_INSTRUCTIONS)
 
-WD_VECTORDB_API_SECRET = os.environ.get("WD_VECTORDB_API_SECRET")
-VECTOR_ENABLED = utils.vectorsearch_verify_apikey(WD_VECTORDB_API_SECRET)
-
 
 def _current_user_agent() -> str:
     try:
@@ -45,9 +42,52 @@ def _current_user_agent() -> str:
         return ""
 
 
-def _format_search_results(results: dict, entity_type: str) -> str:
+@mcp.tool()
+async def search_items(query: str, lang: str = "en") -> str:
+    """Search Wikidata items (QIDs) using semantic and keyword search.
+
+    Run this before the other tools to find QIDs of relevant items.
+
+    Args:
+        query: Natural-language text for searching Wikidata.
+        lang: Language code.
+
+    Returns:
+        Newline-separated results in the form:
+        QID: label — description
+
+    Example:
+        >>> search_items("English science-fiction novel")
+        Q23163: A Scientific Romance — 1997 novel by Ronald Wright
+        Q627333: The Time Machine — 1895 dystopian science fiction novella by H. G. Wells
+    """
+    if not query.strip():
+        return "Query cannot be empty."
+
+    user_agent = _current_user_agent()
+    try:
+        results = await utils.vectorsearch(
+            query,
+            lang=lang,
+            user_agent=user_agent,
+        )
+    except Exception:
+        try:
+            results = await utils.keywordsearch(
+                query,
+                type="item",
+                lang=lang,
+                user_agent=user_agent,
+            )
+        except requests.RequestException:
+            traceback.print_exc()
+            return "Wikidata is currently unavailable. Please retry shortly."
+        except Exception:
+            traceback.print_exc()
+            return "Unexpected server error while processing the request."
+
     if not results:
-        return f"No matching Wikidata {entity_type}s found."
+        return "No matching items found. Try another query."
 
     text_val = [
         f"{entity_id}: {val.get('label', '')} — {val.get('description', '')}" for entity_id, val in results.items()
@@ -55,215 +95,72 @@ def _format_search_results(results: dict, entity_type: str) -> str:
     return "\n".join(text_val)
 
 
-# Enable vector search if the API key is set
-if VECTOR_ENABLED:
+@mcp.tool()
+async def search_properties(query: str, lang: str = "en") -> str:
+    """Search Wikidata properties (PIDs) using semantic and keyword search.
 
-    @mcp.tool()
-    async def search_items(query: str, lang: str = "en") -> str:
-        """Search Wikidata items (QIDs) using vector and keyword search.
+    Run this before the other tools to find PIDs of relevant properties.
 
-        Find conceptually similar Wikidata items from a natural-language query.
-        Matches are based on meaning and exact words.
+    Args:
+        query: Natural-language text for searching Wikidata.
+        lang: Language code.
 
-        Args:
-            query: Natural-language description of the concept to find.
-            lang: Language code for the search (default: 'en').
+    Returns:
+        Newline-separated results in the form:
+        PID: label — description
 
-        Returns:
-            Newline-separated results in the form:
-                QID: label — description
+    Example:
+        >>> search_properties("residence of a person")
+        P551: residence — the place where the person is or has been, resident
+        P276: location — location of the object, structure or event
+    """
+    if not query.strip():
+        return "Query cannot be empty."
 
-        Example:
-            >>> search_items("English science-fiction novel")
-            Q23163: A Scientific Romance — 1997 novel by Ronald Wright
-            Q627333: The Time Machine — 1895 dystopian science fiction novella by H. G. Wells
-        """
-        if not query.strip():
-            return "Query cannot be empty."
-
-        user_agent = _current_user_agent()
-        try:
-            results = await utils.vectorsearch(
-                query,
-                WD_VECTORDB_API_SECRET,
-                lang=lang,
-                user_agent=user_agent,
-            )
-        except requests.RequestException:
-            try:
-                results = await utils.keywordsearch(
-                    query,
-                    type="item",
-                    lang=lang,
-                    user_agent=user_agent,
-                )
-            except requests.RequestException:
-                return "Wikidata is currently unavailable. Please retry shortly."
-        except Exception:
-            try:
-                results = await utils.keywordsearch(
-                    query,
-                    type="item",
-                    lang=lang,
-                    user_agent=user_agent,
-                )
-            except requests.RequestException:
-                return "Wikidata is currently unavailable. Please retry shortly."
-            except Exception:
-                return "Unexpected server error while processing the request."
-
-        return _format_search_results(results, "item")
-
-    @mcp.tool()
-    async def search_properties(query: str, lang: str = "en") -> str:
-        """Search Wikidata properties (PIDs) using vector and keyword search.
-
-        Find relevant Wikidata properties from a natural-language description of
-        the relationship you need. Matches are based on meaning and exact words.
-
-        Args:
-            query: Natural-language description of the concept to find.
-            lang: Language code for the search (default: 'en').
-
-        Returns:
-            Newline-separated results in the form:
-                PID: label — description
-
-        Example:
-            >>> search_properties("residence of a person")
-            P551: residence — the place where the person is or has been, resident
-            P276: location — location of the object, structure or event
-        """
-        if not query.strip():
-            return "Query cannot be empty."
-
-        user_agent = _current_user_agent()
-        try:
-            results = await utils.vectorsearch(
-                query,
-                WD_VECTORDB_API_SECRET,
-                type="property",
-                lang=lang,
-                user_agent=user_agent,
-            )
-        except requests.RequestException:
-            try:
-                results = await utils.keywordsearch(
-                    query,
-                    type="property",
-                    lang=lang,
-                    user_agent=user_agent,
-                )
-            except requests.RequestException:
-                return "Wikidata is currently unavailable. Please retry shortly."
-        except Exception:
-            try:
-                results = await utils.keywordsearch(
-                    query,
-                    type="property",
-                    lang=lang,
-                    user_agent=user_agent,
-                )
-            except requests.RequestException:
-                return "Wikidata is currently unavailable. Please retry shortly."
-            except Exception:
-                return "Unexpected server error while processing the request."
-
-        return _format_search_results(results, "property")
-
-else:
-    print(
-        "WD_VECTORDB_API_SECRET not set: \
-        vector search tools are not registered."
-    )
-
-    @mcp.tool()
-    async def search_items(query: str, lang: str = "en") -> str:
-        """Search Wikidata items (QIDs) with exact text matching.
-
-        Looks up items by label/alias or literal phrases expected to appear in
-        Wikidata. Useful when you already know the entity you are looking for.
-
-        Args:
-            query: Label, alias, or phrase expected to appear verbatim.
-            lang: Language code for the search (default: 'en').
-
-        Returns:
-            Newline-separated lines in the form:
-            QID: label — description
-
-        Example:
-            >>> search_items("Douglas Adams")
-            Q42: Douglas Adams — English science fiction writer and humorist
-            Q28421831: Douglas Adams — American environmental engineer
-        """
-        if not query.strip():
-            return "Query cannot be empty."
-
-        try:
-            results = await utils.keywordsearch(
-                query,
-                type="item",
-                lang=lang,
-                user_agent=_current_user_agent(),
-            )
-        except requests.RequestException:
-            return "Wikidata is currently unavailable. Please retry shortly."
-        except Exception:
-            return "Unexpected server error while processing the request."
-
-        return _format_search_results(results, "item")
-
-    @mcp.tool()
-    async def search_properties(query: str, lang: str = "en") -> str:
-        """Search Wikidata properties (PIDs) with exact text matching.
-
-        Looks up properties by label/alias or literal phrases expected to appear
-        in Wikidata. Useful when the expected property name is already known.
-
-        Args:
-            query: Label, alias, or phrase expected to appear verbatim.
-            lang: Language code for the search (default: 'en').
-
-        Returns:
-            Newline-separated lines in the form:
-            PID: label — description
-
-        Example:
-            >>> search_properties("residence")
-            P551: residence — the place where the person is or has been, resident
-            P276: location — location of the object, structure or event
-        """
-        if not query.strip():
-            return "Query cannot be empty."
-
+    user_agent = _current_user_agent()
+    try:
+        results = await utils.vectorsearch(
+            query,
+            type="property",
+            lang=lang,
+            user_agent=user_agent,
+        )
+    except Exception:
         try:
             results = await utils.keywordsearch(
                 query,
                 type="property",
                 lang=lang,
-                user_agent=_current_user_agent(),
+                user_agent=user_agent,
             )
         except requests.RequestException:
+            traceback.print_exc()
             return "Wikidata is currently unavailable. Please retry shortly."
         except Exception:
+            traceback.print_exc()
             return "Unexpected server error while processing the request."
 
-        return _format_search_results(results, "property")
+    if not results:
+        return "No matching properties found. Try another query."
+
+    text_val = [
+        f"{entity_id}: {val.get('label', '')} — {val.get('description', '')}" for entity_id, val in results.items()
+    ]
+    return "\n".join(text_val)
 
 
 @mcp.tool()
 async def get_statements(entity_id: str, include_external_ids: bool = False, lang: str = "en") -> str:
-    """Return direct statements (property-value pairs) for a Wikidata entity.
+    """Retrieve direct statements (property-value pairs) for a Wikidata entity.
 
-    Expose graph connections to inspect factual context. This tool does not
-    include deprecated values, qualifiers, or references.
-    Use `get_statement_values` for those details.
+    Run this after obtaining explicit IDs from search or user input.
+    Does not include deprecated values, qualifiers, or references.
+    Use `get_statement_values` when those details are needed.
 
     Args:
-        entity_id: A QID or PID such as "Q42" or "P31".
+        entity_id: A QID or PID.
         include_external_ids: Whether to include external identifiers linking to other databases.
-        lang: Language code for labels and descriptions (default: 'en').
+        lang: Language code.
 
     Returns:
         One statement per line in the form:
@@ -287,27 +184,30 @@ async def get_statements(entity_id: str, include_external_ids: bool = False, lan
             user_agent=_current_user_agent(),
         )
     except requests.RequestException:
+        traceback.print_exc()
         return "Wikidata is currently unavailable. Please retry shortly."
     except Exception:
+        traceback.print_exc()
         return "Unexpected server error while processing the request."
 
-    if not result:
-        return f"Entity {entity_id} not found"
+    if (not result) or (entity_id not in result):
+        return f"Entity {entity_id} not found. Try finding correct IDs with search."
 
-    return result.get(entity_id, f"Entity {entity_id} not found")
+    return result.get(entity_id)
 
 
 @mcp.tool()
 async def get_statement_values(entity_id: str, property_id: str, lang: str = "en") -> str:
     """Return full values for an entity-property statement pair.
 
+    Run this after obtaining explicit IDs from search, statements or user input.
     Includes qualifiers, ranks, and references, including deprecated values and
-    references excluded from `get_statements`.
+    references.
 
     Args:
-        entity_id: A QID or PID such as "Q42" or "P31".
-        property_id: A PID such as "P31".
-        lang: Language code for labels and descriptions (default: 'en').
+        entity_id: A QID or PID.
+        property_id: A PID.
+        lang: Language code.
 
     Returns:
         Complete statement details showing:
@@ -345,37 +245,36 @@ async def get_statement_values(entity_id: str, property_id: str, lang: str = "en
             user_agent=_current_user_agent(),
         )
     except requests.RequestException:
+        traceback.print_exc()
         return "Wikidata is currently unavailable. Please retry shortly."
     except Exception:
+        traceback.print_exc()
         return "Unexpected server error while processing the request."
 
-    if not result:
-        return f"Entity {entity_id} not found"
+    if (not result) or (entity_id not in result):
+        return f"Entity {entity_id} not found. Try finding correct IDs with search."
 
     entity = result.get(entity_id)
-    if not entity:
-        return f"Entity {entity_id} not found"
-
     text = utils.triplet_values_to_string(entity_id, property_id, entity)
     if not text:
-        return f"No statement found for {entity_id} with property {property_id}"
+        return f"No statement found for {entity_id} with property {property_id}. Check {entity_id}'s statements."
     return text
 
 
 @mcp.tool()
 async def get_instance_and_subclass_hierarchy(entity_id: str, max_depth: int = 5, lang: str = "en") -> str:
-    """Expose hierarchical context for a Wikidata entity.
+    """Return a nested hierarchy of entities connected by "instance of" (P31) and "subclass of" (P279) relationships.
 
-    Retrieves relationships based on "instance of" (P31) and
-    "subclass of" (P279) properties.
+    Run this after obtaining explicit IDs from search,
+    statements, or user input.
 
     Args:
-        entity_id: A QID or PID such as "Q42" or "P31".
-        max_depth: Maximum depth of the hierarchy to retrieve. Defaults to 5.
-        lang: Language code for labels and descriptions (default: 'en').
+        entity_id: A QID or PID.
+        max_depth: Maximum traversal depth.
+        lang: Language code.
 
     Returns:
-        JSON-formatted hierarchical data showing the entity's placement in the ontology.
+        JSON-formatted nested hierarchy data
 
     Example:
         >>> get_instance_and_subclass_hierarchy("Q42", max_depth=2)
@@ -395,21 +294,26 @@ async def get_instance_and_subclass_hierarchy(entity_id: str, max_depth: int = 5
     """
     if not entity_id.strip():
         return "Entity ID cannot be empty."
+    if max_depth < 0:
+        return "max_depth must be greater than or equal to 0."
 
     try:
         result = await utils.get_hierarchy_data(entity_id, max_depth, lang=lang)
     except requests.RequestException:
+        traceback.print_exc()
         return "Wikidata is currently unavailable. Please retry shortly."
     except Exception:
+        traceback.print_exc()
         return "Unexpected server error while processing the request."
 
-    if not result or entity_id not in result:
-        return f"Entity {entity_id} not found"
+    if (not result) or (entity_id not in result):
+        return f"Entity {entity_id} not found. Try finding the correct IDs with search."
 
     try:
         result = utils.hierarchy_to_json(entity_id, result, level=max_depth)
         return json.dumps(result, indent=2)
     except Exception:
+        traceback.print_exc()
         return "Unexpected server error while processing the request."
 
 
@@ -417,8 +321,8 @@ async def get_instance_and_subclass_hierarchy(entity_id: str, max_depth: int = 5
 async def execute_sparql(sparql: str, K: int = 10) -> str:
     """Execute a SPARQL query against Wikidata and return up to K rows.
 
-    Use this only when every QID/PID in the query was either user-provided or
-    discovered from earlier tool outputs in this session.
+    Run this only when every QID/PID in the query was either user-provided or
+    discovered from other tools.
 
     Important:
     - QIDs and PIDs may be shuffled.
@@ -427,28 +331,27 @@ async def execute_sparql(sparql: str, K: int = 10) -> str:
     - Only provide information extracted from Wikidata.
 
     Tips:
-        • Use the search and entity tools first to discover relevant QIDs and PIDs before writing a SPARQL query.
+        • Use the search and statements tools first to discover relevant QIDs and PIDs before writing a SPARQL query.
 
-        • For class-based filtering, use:
+        • For class-based filtering, use a property path:
             wdt:P31/wdt:P279*
             This expands both instance-of and subclass-of relationships.
-            Use the get_instance_and_subclass_hierarchy tool to verify which class ID to filter on.
+            Examine hierarchy links first before applying this pattern.
 
-        • Add the label service to display readable names instead of QIDs:
+        • Add the label service to display readable names:
             SERVICE wikibase:label { bd:serviceParam wikibase:language "[AUTO_LANGUAGE],en,mul". }
 
         • Filtering by date:
             ?item wdt:P569 ?date.
             FILTER(YEAR(?date) = 1998 && MONTH(?date) = 11 && DAY(?date) = 28)
-            This example filters by exact day.
 
         • Getting normalized quantity values:
-            ?item p:P2048 ?statement. # P2048 = height
+            ?item p:P2048 ?statement.
             ?statement a wikibase:BestRank;
                 psn:P2048 ?valueNode.
-            ?valueNode wikibase:quantityUnit wd:Q11573; # unit in metres
-                wikibase:quantityAmount ?height.
-            This ensures all values are normalized and comparable across items.
+            ?valueNode wikibase:quantityUnit wd:Q11573;
+                wikibase:quantityAmount ?amount.
+            This ensures all values are normalized and comparable across entities.
 
     Args:
         sparql: A valid SPARQL string.
@@ -465,6 +368,8 @@ async def execute_sparql(sparql: str, K: int = 10) -> str:
     """
     if not sparql.strip():
         return "SPARQL query cannot be empty."
+    if K <= 0:
+        return "K must be greater than 0."
 
     try:
         result = await utils.execute_sparql(
@@ -473,22 +378,25 @@ async def execute_sparql(sparql: str, K: int = 10) -> str:
             user_agent=_current_user_agent(),
         )
     except ValueError as e:
+        traceback.print_exc()
         return str(e)
     except requests.RequestException:
+        traceback.print_exc()
         return "Wikidata is currently unavailable. Please retry shortly."
     except Exception:
+        traceback.print_exc()
         return "Unexpected server error while processing the request."
 
     if len(result) == 0:
         return (
             "SPARQL query returned no data.\n"
-            "Double-check the structure using `search_items`/`search_properties`, "
-            "`get_statements`, and `get_statement_values`, then refine and retry."
+            "Verify the structure using the search and get statements tools, then refine and retry."
         )
 
     try:
         return result.to_csv(sep=";", index=True, header=True)
     except Exception:
+        traceback.print_exc()
         return "Unexpected server error while processing the request."
 
 
