@@ -12,23 +12,28 @@ from wikidataMCP import utils
 SERVER_INSTRUCTIONS = """
 Explore Wikidata without assumptions.
 
-IMPORTANT:
+Rules:
 - QIDs and PIDs may be shuffled.
 - Never rely on memorized identifiers.
-- Never invent QIDs or PIDs.
-- Only provide information extracted from Wikidata.
+- Never invent QIDs or PIDs; discover them with Step 1 tools.
+- Never assume graph structure, connections, or ontology paths.
+- Never present unsupported facts; use only information grounded in Wikidata
+  tool/query outputs.
 
-Execution policy:
-1. Start with discovery tools (`search_items`, `search_properties`) to identify
-   candidate QIDs/PIDs.
-2. Validate structure with `get_statements`, `get_statement_values`, or
-   `get_instance_and_subclass_hierarchy`.
-3. Use `execute_sparql` only when all QIDs/PIDs referenced in the query are
-   either:
-   - explicitly provided by the user, or
-   - discovered from prior tool outputs.
-4. If results are missing, empty, inconsistent, or ambiguous, run another
-  discovery/validation step, then refine and retry.
+Workflow:
+- Step 1 (Discovery): use `search_items` and `search_properties` first to find
+  candidate QIDs/PIDs and concrete examples.
+- Step 2 (Structure Validation): use `get_statements`,
+  `get_statement_values`, or `get_instance_and_subclass_hierarchy` to verify
+  relationships, statement details, and hierarchy paths before SPARQL.
+- Step 3 (SPARQL Execution): use `execute_sparql` only after Steps 1 and 2 are
+  complete, and only with QIDs/PIDs that are user-provided or confirmed by
+  prior tool outputs.
+
+Post-execution:
+- Confirm results match the user's intent and expected answer pattern.
+- If results are missing, empty, inconsistent, or ambiguous, do not finalize
+  and do not infer missing facts; return to Steps 1 and 2, refine, and retry.
 """.strip()
 
 mcp = FastMCP("Wikidata MCP", instructions=SERVER_INSTRUCTIONS)
@@ -46,7 +51,13 @@ def _current_user_agent() -> str:
 async def search_items(query: str, lang: str = "en") -> str:
     """Search Wikidata items (QIDs) using semantic and keyword search.
 
-    Run this before the other tools to find QIDs of relevant items.
+    Rule:
+    - Never invent or use memorized item IDs; use this tool to discover them.
+
+    Workflow:
+    - Step 1 (Discovery): run this first to discover candidate QIDs and
+      concrete examples.
+    - Prerequisite: none.
 
     Args:
         query: Natural-language text for searching Wikidata.
@@ -99,7 +110,14 @@ async def search_items(query: str, lang: str = "en") -> str:
 async def search_properties(query: str, lang: str = "en") -> str:
     """Search Wikidata properties (PIDs) using semantic and keyword search.
 
-    Run this before the other tools to find PIDs of relevant properties.
+    Rule:
+    - Never invent or use memorized property IDs; use this tool to discover
+      them.
+
+    Workflow:
+    - Step 1 (Discovery): run this first to discover candidate PIDs and
+      concrete examples.
+    - Prerequisite: none.
 
     Args:
         query: Natural-language text for searching Wikidata.
@@ -153,9 +171,14 @@ async def search_properties(query: str, lang: str = "en") -> str:
 async def get_statements(entity_id: str, include_external_ids: bool = False, lang: str = "en") -> str:
     """Retrieve direct statements (property-value pairs) for a Wikidata entity.
 
-    Run this after obtaining explicit IDs from search or user input.
-    Does not include deprecated values, qualifiers, or references.
-    Use `get_statement_values` when those details are needed.
+    Rule:
+    - Never assume graph structure or entity connections; use this tool to
+      verify direct relationships.
+
+    Workflow:
+    - Step 2 (Structure Validation): run this after obtaining a QID/PID from
+      search or user input, and before SPARQL.
+    - This tool does not include deprecated values, qualifiers, or references.
 
     Args:
         entity_id: A QID or PID.
@@ -200,9 +223,14 @@ async def get_statements(entity_id: str, include_external_ids: bool = False, lan
 async def get_statement_values(entity_id: str, property_id: str, lang: str = "en") -> str:
     """Return full values for an entity-property statement pair.
 
-    Run this after obtaining explicit IDs from search, statements or user input.
-    Includes qualifiers, ranks, and references, including deprecated values and
-    references.
+    Rule:
+    - Never assume statement details or connections; use this tool to verify
+      full values for an entity-property pair.
+
+    Workflow:
+    - Step 2 (Structure Validation): run this after obtaining an entity ID and
+      property ID from search or user input, and before SPARQL when detailed
+      statement values matter.
 
     Args:
         entity_id: A QID or PID.
@@ -265,8 +293,13 @@ async def get_statement_values(entity_id: str, property_id: str, lang: str = "en
 async def get_instance_and_subclass_hierarchy(entity_id: str, max_depth: int = 5, lang: str = "en") -> str:
     """Return a nested hierarchy of entities connected by "instance of" (P31) and "subclass of" (P279) relationships.
 
-    Run this after obtaining explicit IDs from search,
-    statements, or user input.
+    Rule:
+    - Never assume ontology paths (P31/P279); use this tool to verify class
+      hierarchy traversal.
+
+    Workflow:
+    - Step 2 (Structure Validation): run this after obtaining a QID/PID from
+      search or user input, and before SPARQL.
 
     Args:
         entity_id: A QID or PID.
@@ -321,18 +354,23 @@ async def get_instance_and_subclass_hierarchy(entity_id: str, max_depth: int = 5
 async def execute_sparql(sparql: str, K: int = 10) -> str:
     """Execute a SPARQL query against Wikidata and return up to K rows.
 
-    Run this only when every QID/PID in the query was either user-provided or
-    discovered from other tools.
+    Rule:
+    - Never present unsupported facts; use only information grounded in the
+      Wikidata query results.
 
-    Important:
-    - QIDs and PIDs may be shuffled.
-    - Never rely on memorized identifiers.
-    - Never invent QIDs or PIDs.
-    - Only provide information extracted from Wikidata.
+    Workflow:
+    - Step 3 (SPARQL Execution): run this only after Step 1 (Discovery) and
+      Step 2 (Structure Validation) are complete.
+    - Use only QIDs/PIDs that are user-provided or confirmed by prior tool
+      outputs.
 
-    Tips:
-        • Use the search and statements tools first to discover relevant QIDs and PIDs before writing a SPARQL query.
+    Post-execution:
+    - Confirm that results match the user's intent and expected answer pattern.
+    - If they do not, do not finalize or infer missing facts; return to Step 1
+      (Discovery) and Step 2 (Structure Validation), refine the query, and
+      retry.
 
+    SPARQL Tips:
         • For class-based filtering, use a property path:
             wdt:P31/wdt:P279*
             This expands both instance-of and subclass-of relationships.
@@ -390,7 +428,7 @@ async def execute_sparql(sparql: str, K: int = 10) -> str:
     if len(result) == 0:
         return (
             "SPARQL query returned no data.\n"
-            "Verify the structure using the search and get statements tools, then refine and retry."
+            "Return to Step 1 (Discovery) and Step 2 (Structure Validation), refine the query, and retry."
         )
 
     try:
