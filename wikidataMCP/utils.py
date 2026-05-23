@@ -86,6 +86,7 @@ async def vectorsearch(query: str, type: str = "item", limit: int = 10, lang: st
         f"{VECTOR_SEARCH_URI}/{type}/query/",
         params={
             "query": query,
+            "lang": lang,
             "k": limit,
         },
         headers={"User-Agent": f"{USER_AGENT} ({user_agent})"},

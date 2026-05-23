@@ -10,7 +10,7 @@ from fastmcp.server.dependencies import get_http_headers
 from wikidataMCP import utils
 
 SERVER_INSTRUCTIONS = """
-Explore Wikidata without assumptions.
+Use this server to search Wikidata, inspect entity statements, validate relationships, and execute SPARQL queries.
 
 Rules:
 - QIDs and PIDs may be shuffled.
