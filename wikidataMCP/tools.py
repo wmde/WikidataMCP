@@ -57,7 +57,6 @@ async def search_items(query: str, lang: str = "en") -> str:
     Workflow:
     - Step 1 (Discovery): run this first to discover candidate QIDs and
       concrete examples.
-    - Prerequisite: none.
 
     Args:
         query: Natural-language text for searching Wikidata.
@@ -117,7 +116,6 @@ async def search_properties(query: str, lang: str = "en") -> str:
     Workflow:
     - Step 1 (Discovery): run this first to discover candidate PIDs and
       concrete examples.
-    - Prerequisite: none.
 
     Args:
         query: Natural-language text for searching Wikidata.
