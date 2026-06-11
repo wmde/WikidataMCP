@@ -76,25 +76,27 @@ async def search_items(query: str, lang: str = "en") -> str:
 
     user_agent = _current_user_agent()
     try:
-        results = await utils.vectorsearch(
-            query,
-            lang=lang,
-            user_agent=user_agent,
-        )
-    except Exception:
         try:
-            results = await utils.keywordsearch(
+            results = await utils.vectorsearch(
                 query,
                 type="item",
                 lang=lang,
                 user_agent=user_agent,
             )
         except requests.RequestException:
-            traceback.print_exc()
-            return "Wikidata is currently unavailable. Please retry shortly."
-        except Exception:
-            traceback.print_exc()
-            return "Unexpected server error while processing the request."
+            # Fallback to keyword search if vector search fails.
+            results = await utils.keywordsearch(
+                query,
+                type="item",
+                lang=lang,
+                user_agent=user_agent,
+            )
+    except requests.RequestException:
+        traceback.print_exc()
+        return "Wikidata is currently unavailable. Please retry shortly."
+    except Exception:
+        traceback.print_exc()
+        return "Unexpected server error while processing the request."
 
     if not results:
         return "No matching items found. Try another query."
@@ -134,27 +136,29 @@ async def search_properties(query: str, lang: str = "en") -> str:
         return "Query cannot be empty."
 
     user_agent = _current_user_agent()
+
     try:
-        results = await utils.vectorsearch(
-            query,
-            type="property",
-            lang=lang,
-            user_agent=user_agent,
-        )
-    except Exception:
         try:
-            results = await utils.keywordsearch(
+            results = await utils.vectorsearch(
                 query,
                 type="property",
                 lang=lang,
                 user_agent=user_agent,
             )
         except requests.RequestException:
-            traceback.print_exc()
-            return "Wikidata is currently unavailable. Please retry shortly."
-        except Exception:
-            traceback.print_exc()
-            return "Unexpected server error while processing the request."
+            # Fallback to keyword search if vector search fails.
+            results = await utils.keywordsearch(
+                query,
+                type="property",
+                lang=lang,
+                user_agent=user_agent,
+            )
+    except requests.RequestException:
+        traceback.print_exc()
+        return "Wikidata is currently unavailable. Please retry shortly."
+    except Exception:
+        traceback.print_exc()
+        return "Unexpected server error while processing the request."
 
     if not results:
         return "No matching properties found. Try another query."
