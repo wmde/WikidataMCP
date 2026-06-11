@@ -1,13 +1,15 @@
 """FastMCP tool and prompt registrations for Wikidata access."""
 
 import json
-import traceback
+import logging
 
 import requests
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_headers
 
 from wikidataMCP import utils
+
+logger = logging.getLogger(__name__)
 
 SERVER_INSTRUCTIONS = """
 Use this server to search Wikidata, inspect entity statements, validate relationships, and execute SPARQL queries.
@@ -83,7 +85,9 @@ async def search_items(query: str, lang: str = "en") -> str:
                 lang=lang,
                 user_agent=user_agent,
             )
-        except requests.RequestException:
+        except requests.RequestException as exc:
+            logger.warning("search_items: Vector database request failed: %s", exc)
+
             # Fallback to keyword search if vector search fails.
             results = await utils.keywordsearch(
                 query,
@@ -91,11 +95,11 @@ async def search_items(query: str, lang: str = "en") -> str:
                 lang=lang,
                 user_agent=user_agent,
             )
-    except requests.RequestException:
-        traceback.print_exc()
+    except requests.RequestException as exc:
+        logger.warning("search_items: Wikidata request failed: %s", exc)
         return "Wikidata is currently unavailable. Please retry shortly."
-    except Exception:
-        traceback.print_exc()
+    except Exception as exc:
+        logger.error("search_items: Unexpected server error: %s", exc)
         return "Unexpected server error while processing the request."
 
     if not results:
@@ -145,7 +149,9 @@ async def search_properties(query: str, lang: str = "en") -> str:
                 lang=lang,
                 user_agent=user_agent,
             )
-        except requests.RequestException:
+        except requests.RequestException as exc:
+            logger.warning("search_properties: Vector database request failed: %s", exc)
+
             # Fallback to keyword search if vector search fails.
             results = await utils.keywordsearch(
                 query,
@@ -153,11 +159,11 @@ async def search_properties(query: str, lang: str = "en") -> str:
                 lang=lang,
                 user_agent=user_agent,
             )
-    except requests.RequestException:
-        traceback.print_exc()
+    except requests.RequestException as exc:
+        logger.warning("search_properties: Wikidata request failed: %s", exc)
         return "Wikidata is currently unavailable. Please retry shortly."
-    except Exception:
-        traceback.print_exc()
+    except Exception as exc:
+        logger.error("search_properties: Unexpected server error: %s", exc)
         return "Unexpected server error while processing the request."
 
     if not results:
@@ -208,11 +214,11 @@ async def get_statements(entity_id: str, include_external_ids: bool = False, lan
             lang=lang,
             user_agent=_current_user_agent(),
         )
-    except requests.RequestException:
-        traceback.print_exc()
+    except requests.RequestException as exc:
+        logger.warning("get_statements: Wikidata request failed: %s", exc)
         return "Wikidata is currently unavailable. Please retry shortly."
-    except Exception:
-        traceback.print_exc()
+    except Exception as exc:
+        logger.error("get_statements: Unexpected server error: %s", exc)
         return "Unexpected server error while processing the request."
 
     if (not result) or (entity_id not in result):
@@ -274,11 +280,11 @@ async def get_statement_values(entity_id: str, property_id: str, lang: str = "en
             lang=lang,
             user_agent=_current_user_agent(),
         )
-    except requests.RequestException:
-        traceback.print_exc()
+    except requests.RequestException as exc:
+        logger.warning("get_statement_values: Wikidata request failed: %s", exc)
         return "Wikidata is currently unavailable. Please retry shortly."
-    except Exception:
-        traceback.print_exc()
+    except Exception as exc:
+        logger.error("get_statement_values: Unexpected server error: %s", exc)
         return "Unexpected server error while processing the request."
 
     if (not result) or (entity_id not in result):
@@ -334,11 +340,11 @@ async def get_instance_and_subclass_hierarchy(entity_id: str, max_depth: int = 5
 
     try:
         result = await utils.get_hierarchy_data(entity_id, max_depth, lang=lang)
-    except requests.RequestException:
-        traceback.print_exc()
+    except requests.RequestException as exc:
+        logger.warning("get_instance_and_subclass_hierarchy: Wikidata request failed: %s", exc)
         return "Wikidata is currently unavailable. Please retry shortly."
-    except Exception:
-        traceback.print_exc()
+    except Exception as exc:
+        logger.error("get_instance_and_subclass_hierarchy: Unexpected server error: %s", exc)
         return "Unexpected server error while processing the request."
 
     if (not result) or (entity_id not in result):
@@ -347,8 +353,8 @@ async def get_instance_and_subclass_hierarchy(entity_id: str, max_depth: int = 5
     try:
         result = utils.hierarchy_to_json(entity_id, result, level=max_depth)
         return json.dumps(result, indent=2)
-    except Exception:
-        traceback.print_exc()
+    except Exception as exc:
+        logger.error("get_instance_and_subclass_hierarchy: Unexpected server error: %s", exc)
         return "Unexpected server error while processing the request."
 
 
@@ -417,14 +423,14 @@ async def execute_sparql(sparql: str, K: int = 10) -> str:
             K=K,
             user_agent=_current_user_agent(),
         )
-    except ValueError as e:
-        traceback.print_exc()
-        return str(e)
-    except requests.RequestException:
-        traceback.print_exc()
+    except ValueError as exc:
+        logger.warning("execute_sparql: Invalid query: %s", exc)
+        return str(exc)
+    except requests.RequestException as exc:
+        logger.warning("execute_sparql: Wikidata request failed: %s", exc)
         return "Wikidata is currently unavailable. Please retry shortly."
-    except Exception:
-        traceback.print_exc()
+    except Exception as exc:
+        logger.error("execute_sparql: Unexpected server error: %s", exc)
         return "Unexpected server error while processing the request."
 
     if len(result) == 0:
@@ -435,8 +441,8 @@ async def execute_sparql(sparql: str, K: int = 10) -> str:
 
     try:
         return result.to_csv(sep=";", index=True, header=True)
-    except Exception:
-        traceback.print_exc()
+    except Exception as exc:
+        logger.error("execute_sparql: Unexpected server error: %s", exc)
         return "Unexpected server error while processing the request."
 
 
