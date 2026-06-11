@@ -14,29 +14,21 @@ logger = logging.getLogger(__name__)
 SERVER_INSTRUCTIONS = """
 Use this server to search Wikidata, inspect entity statements, validate relationships, and execute SPARQL queries.
 
-Rules:
-- QIDs and PIDs may be shuffled.
-- Never rely on memorized identifiers.
-- Never invent QIDs or PIDs; discover them with Step 1 tools.
-- Never assume graph structure, connections, or ontology paths.
-- Never present unsupported facts; use only information grounded in Wikidata
-  tool/query outputs.
-
 Workflow:
-- Step 1 (Discovery): use `search_items` and `search_properties` first to find
-  candidate QIDs/PIDs and concrete examples.
-- Step 2 (Structure Validation): use `get_statements`,
-  `get_statement_values`, or `get_instance_and_subclass_hierarchy` to verify
-  relationships, statement details, and hierarchy paths before SPARQL.
-- Step 3 (SPARQL Execution): use `execute_sparql` only after Steps 1 and 2 are
-  complete, and only with QIDs/PIDs that are user-provided or confirmed by
-  prior tool outputs.
+- Step 1 (Discovery): use `search_items` and `search_properties` to find candidate QIDs/PIDs and concrete examples.
+- Step 2 (Structure Validation): use `get_statements`, `get_statement_values`, and `get_instance_and_subclass_hierarchy` to verify how entities are modeled — relationships, values, and class paths.
+- Step 3 (SPARQL Execution): construct the SPARQL only from IDs and relationships confirmed in Steps 1-2, then run it with `execute_sparql`.
+
+Rules:
+- QIDs and PIDs were shuffled, never use memorized or invented identifiers; discover IDs with Step 1 tools.
+- Never assume graph structure, connections, or ontology paths; verify them with Step 2 tools.
+- Never present unsupported facts; use only information grounded in Wikidata tool/query outputs.
+- If the request is ambiguous, resolve it with Step 1 and 2 tools, or ask the user.
 
 Post-execution:
 - Confirm results match the user's intent and expected answer pattern.
-- If results are missing, empty, inconsistent, or ambiguous, do not finalize
-  and do not infer missing facts; return to Steps 1 and 2, refine, and retry.
-""".strip()
+- If results are missing, empty, inconsistent, or ambiguous, do not finalize and do not infer missing facts; return to Steps 1 and 2, refine, and retry.
+""".strip()  # noqa: E501
 
 mcp = FastMCP("Wikidata MCP", instructions=SERVER_INSTRUCTIONS)
 
@@ -53,26 +45,21 @@ def _current_user_agent() -> str:
 async def search_items(query: str, lang: str = "en") -> str:
     """Search Wikidata items (QIDs) using semantic and keyword search.
 
-    Rule:
-    - Never invent or use memorized item IDs; use this tool to discover them.
-
-    Workflow:
-    - Step 1 (Discovery): run this first to discover candidate QIDs and
-      concrete examples.
+    Never invent or use memorized item QIDs; use this tool to discover candidate QIDs and concrete examples.
 
     Args:
         query: Natural-language text for searching Wikidata.
         lang: Language code.
 
     Returns:
-        Newline-separated results in the form:
+        Newline-separated item candidates:
         QID: label — description
 
     Example:
         >>> search_items("English science-fiction novel")
         Q23163: A Scientific Romance — 1997 novel by Ronald Wright
         Q627333: The Time Machine — 1895 dystopian science fiction novella by H. G. Wells
-    """
+    """  # noqa: E501
     if not query.strip():
         return "Query cannot be empty."
 
@@ -115,27 +102,21 @@ async def search_items(query: str, lang: str = "en") -> str:
 async def search_properties(query: str, lang: str = "en") -> str:
     """Search Wikidata properties (PIDs) using semantic and keyword search.
 
-    Rule:
-    - Never invent or use memorized property IDs; use this tool to discover
-      them.
-
-    Workflow:
-    - Step 1 (Discovery): run this first to discover candidate PIDs and
-      concrete examples.
+    Never invent or use memorized property PIDs; use this tool to discover candidate PIDs.
 
     Args:
         query: Natural-language text for searching Wikidata.
         lang: Language code.
 
     Returns:
-        Newline-separated results in the form:
+        Newline-separated property candidates:
         PID: label — description
 
     Example:
         >>> search_properties("residence of a person")
         P551: residence — the place where the person is or has been, resident
         P276: location — location of the object, structure or event
-    """
+    """  # noqa: E501
     if not query.strip():
         return "Query cannot be empty."
 
@@ -179,14 +160,10 @@ async def search_properties(query: str, lang: str = "en") -> str:
 async def get_statements(entity_id: str, include_external_ids: bool = False, lang: str = "en") -> str:
     """Retrieve direct statements (property-value pairs) for a Wikidata entity.
 
-    Rule:
-    - Never assume graph structure or entity connections; use this tool to
-      verify direct relationships.
+    Never assume graph structure or entity relationships; use this tool to find how entities are modeled.
 
-    Workflow:
-    - Step 2 (Structure Validation): run this after obtaining a QID/PID from
-      search or user input, and before SPARQL.
-    - This tool does not include deprecated values, qualifiers, or references.
+    Prerequisites:
+        Get candidate QID/PIDs from search tools or user input.
 
     Args:
         entity_id: A QID or PID.
@@ -201,7 +178,7 @@ async def get_statements(entity_id: str, include_external_ids: bool = False, lan
         >>> get_statements("Q42")
         Douglas Adams (Q42): instance of (P31): human (Q5)
         Douglas Adams (Q42): occupation (P106): novelist (Q6625963)
-    """
+    """  # noqa: E501
     if not entity_id.strip():
         return "Entity ID cannot be empty."
 
@@ -229,16 +206,13 @@ async def get_statements(entity_id: str, include_external_ids: bool = False, lan
 
 @mcp.tool()
 async def get_statement_values(entity_id: str, property_id: str, lang: str = "en") -> str:
-    """Return full values for an entity-property statement pair.
+    """Return full detailed values for an entity-property statement pair, including qualifiers, references, and all ranks.
 
-    Rule:
-    - Never assume statement details or connections; use this tool to verify
-      full values for an entity-property pair.
+    Never assume statement details or relationships; use this tool to verify values for an entity-property pair.
 
-    Workflow:
-    - Step 2 (Structure Validation): run this after obtaining an entity ID and
-      property ID from search or user input, and before SPARQL when detailed
-      statement values matter.
+    Prerequisites:
+        Get candidate QID/PIDs from search tools or user input.
+        Confirm the entity-property relationship exists with the statement tool.
 
     Args:
         entity_id: A QID or PID.
@@ -263,7 +237,7 @@ async def get_statement_values(entity_id: str, property_id: str, lang: str = "en
           Reference 1:
             - stated in (P248): Who's Who (Q2567271)
             - Who's Who UK ID (P4789): U4994
-    """
+    """  # noqa: E501
     if not entity_id.strip():
         return "Entity ID cannot be empty."
     if not property_id.strip():
@@ -301,13 +275,10 @@ async def get_statement_values(entity_id: str, property_id: str, lang: str = "en
 async def get_instance_and_subclass_hierarchy(entity_id: str, max_depth: int = 5, lang: str = "en") -> str:
     """Return a nested hierarchy of entities connected by "instance of" (P31) and "subclass of" (P279) relationships.
 
-    Rule:
-    - Never assume ontology paths (P31/P279); use this tool to verify class
-      hierarchy traversal.
+    Never assume class paths (P31/P279); use this tool to verify hierarchy.
 
-    Workflow:
-    - Step 2 (Structure Validation): run this after obtaining a QID/PID from
-      search or user input, and before SPARQL.
+    Prerequisites:
+        Get candidate QID/PIDs from search tools or user input.
 
     Args:
         entity_id: A QID or PID.
@@ -315,7 +286,7 @@ async def get_instance_and_subclass_hierarchy(entity_id: str, max_depth: int = 5
         lang: Language code.
 
     Returns:
-        JSON-formatted nested hierarchy data
+        JSON-formatted nested hierarchy
 
     Example:
         >>> get_instance_and_subclass_hierarchy("Q42", max_depth=2)
@@ -332,7 +303,7 @@ async def get_instance_and_subclass_hierarchy(entity_id: str, max_depth: int = 5
             "subclassof": []
           }
         }
-    """
+    """  # noqa: E501
     if not entity_id.strip():
         return "Entity ID cannot be empty."
     if max_depth < 0:
@@ -362,42 +333,32 @@ async def get_instance_and_subclass_hierarchy(entity_id: str, max_depth: int = 5
 async def execute_sparql(sparql: str, K: int = 10) -> str:
     """Execute a SPARQL query against Wikidata and return up to K rows.
 
-    Rule:
-    - Never present unsupported facts; use only information grounded in the
-      Wikidata query results.
-
-    Workflow:
-    - Step 3 (SPARQL Execution): run this only after Step 1 (Discovery) and
-      Step 2 (Structure Validation) are complete.
-    - Use only QIDs/PIDs that are user-provided or confirmed by prior tool
-      outputs.
+    Prerequisites:
+        Get candidate QID/PIDs from search tools or user input.
+        Verify entity relationships and graph structure with statement tools.
+        Check required class paths with the instance and subclass hierarchy tool.
+        Confirm that the generated SPARQL is based on discovered ontology from other tools.
 
     Post-execution:
-    - Confirm that results match the user's intent and expected answer pattern.
-    - If they do not, do not finalize or infer missing facts; return to Step 1
-      (Discovery) and Step 2 (Structure Validation), refine the query, and
-      retry.
+        Confirm that results match the user's intent and expected answer pattern. If they do not, do not finalize or infer missing facts; return to the other tools, refine the query, and retry.
 
     SPARQL Tips:
-        • For class-based filtering, use a property path:
-            wdt:P31/wdt:P279*
-            This expands both instance-of and subclass-of relationships.
-            Examine hierarchy links first before applying this pattern.
+        Class-based filtering:
+            wdt:P31/wdt:P279* # Choose based on the hierarchy tool's output.
 
-        • Add the label service to display readable names:
+        Counting:
+            (COUNT(DISTINCT ?x) AS ?count) # Multiple values inflates counts.
+
+        Labels:
             SERVICE wikibase:label { bd:serviceParam wikibase:language "[AUTO_LANGUAGE],en,mul". }
 
-        • Filtering by date:
+        Date filter:
             ?item wdt:P569 ?date.
             FILTER(YEAR(?date) = 1998 && MONTH(?date) = 11 && DAY(?date) = 28)
 
-        • Getting normalized quantity values:
-            ?item p:P2048 ?statement.
-            ?statement a wikibase:BestRank;
-                psn:P2048 ?valueNode.
-            ?valueNode wikibase:quantityUnit wd:Q11573;
-                wikibase:quantityAmount ?amount.
-            This ensures all values are normalized and comparable across entities.
+        Normalized quantities:
+            ?item p:P2048 ?st.
+            ?st a wikibase:BestRank; psn:P2048/wikibase:quantityAmount ?amount.
 
     Args:
         sparql: A valid SPARQL string.
@@ -407,11 +368,13 @@ async def execute_sparql(sparql: str, K: int = 10) -> str:
         CSV text (semicolon-separated) of the results with up to K rows.
 
     Example:
+        >>> # search_items("human") returned Q5
+        >>> # get_statements("Q42") confirmed: instance of (P31): human (Q5)
         >>> execute_sparql("SELECT ?human WHERE { ?human wdt:P31 wd:Q5 } LIMIT 2")
         ;human
         0;Q42
         1;Q820
-    """
+    """  # noqa: E501
     if not sparql.strip():
         return "SPARQL query cannot be empty."
     if K <= 0:
@@ -436,7 +399,10 @@ async def execute_sparql(sparql: str, K: int = 10) -> str:
     if len(result) == 0:
         return (
             "SPARQL query returned no data.\n"
-            "Return to Step 1 (Discovery) and Step 2 (Structure Validation), refine the query, and retry."
+            "Re-discover QIDs with search tools, "
+            "verify patterns and entity relationships with statement tools, "
+            "check class paths with the hierarchy tool, "
+            "then refine the SPARQL query and retry."
         )
 
     try:
