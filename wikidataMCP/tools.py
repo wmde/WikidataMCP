@@ -34,11 +34,32 @@ mcp = FastMCP("Wikidata MCP", instructions=SERVER_INSTRUCTIONS)
 
 
 def _current_user_agent() -> str:
+    """Get the current HTTP User-Agent header."""
     try:
         headers = get_http_headers(include_all=True)
         return headers.get("user-agent", "")
     except Exception:
         return ""
+
+
+async def _search_entities(query: str, entity_type: str, lang: str, user_agent: str, tool_name: str):
+    """Helper function for vector search with a keyword search fallback for items or properties."""
+    try:
+        return await utils.vectorsearch(
+            query,
+            type=entity_type,
+            lang=lang,
+            user_agent=user_agent,
+        )
+    except requests.RequestException as exc:
+        logger.warning("%s: Vector database request failed: %s", tool_name, exc)
+
+    return await utils.keywordsearch(
+        query,
+        type=entity_type,
+        lang=lang,
+        user_agent=user_agent,
+    )
 
 
 @mcp.tool()
@@ -65,23 +86,7 @@ async def search_items(query: str, lang: str = "en") -> str:
 
     user_agent = _current_user_agent()
     try:
-        try:
-            results = await utils.vectorsearch(
-                query,
-                type="item",
-                lang=lang,
-                user_agent=user_agent,
-            )
-        except requests.RequestException as exc:
-            logger.warning("search_items: Vector database request failed: %s", exc)
-
-            # Fallback to keyword search if vector search fails.
-            results = await utils.keywordsearch(
-                query,
-                type="item",
-                lang=lang,
-                user_agent=user_agent,
-            )
+        results = await _search_entities(query, "item", lang, user_agent, "search_items")
     except requests.RequestException as exc:
         logger.warning("search_items: Wikidata request failed: %s", exc)
         return "Wikidata is currently unavailable. Please retry shortly."
@@ -121,25 +126,8 @@ async def search_properties(query: str, lang: str = "en") -> str:
         return "Query cannot be empty."
 
     user_agent = _current_user_agent()
-
     try:
-        try:
-            results = await utils.vectorsearch(
-                query,
-                type="property",
-                lang=lang,
-                user_agent=user_agent,
-            )
-        except requests.RequestException as exc:
-            logger.warning("search_properties: Vector database request failed: %s", exc)
-
-            # Fallback to keyword search if vector search fails.
-            results = await utils.keywordsearch(
-                query,
-                type="property",
-                lang=lang,
-                user_agent=user_agent,
-            )
+        results = await _search_entities(query, "property", lang, user_agent, "search_properties")
     except requests.RequestException as exc:
         logger.warning("search_properties: Wikidata request failed: %s", exc)
         return "Wikidata is currently unavailable. Please retry shortly."
