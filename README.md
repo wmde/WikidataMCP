@@ -58,6 +58,15 @@ With Docker:
 docker compose up --build
 ```
 
+### Open WebUI
+
+`open_webui_tools.py` provides an Open WebUI-compatible `Tools` class that
+proxies all six tools to `https://wd-mcp.wmcloud.org/mcp/`.
+
+Copy the file into an Open WebUI workspace tool. The endpoint and request
+timeout can optionally be changed with `WIKIDATA_MCP_URL` and
+`WIKIDATA_MCP_TIMEOUT`.
+
 ---
 
 ## 🌐 Services

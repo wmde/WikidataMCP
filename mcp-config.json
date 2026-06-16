@@ -1,7 +1,8 @@
 {
   "mcpServers": {
-    "external": {
-      "url": "https://wd-mcp.wmcloud.org/mcp"
+    "wikidata": {
+      "type": "streamable_http",
+      "url": "https://wd-mcp.wmcloud.org/mcp/"
     }
   }
 }
