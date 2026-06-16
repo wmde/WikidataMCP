@@ -63,34 +63,7 @@ async def keywordsearch(query: str, type: str = "item", limit: int = 10, lang: s
     return item_dict
 
 
-def vectorsearch_verify_apikey(x_api_key: str) -> bool:
-    """Verifies if the provided API key is valid for vector search.
-
-    Args:
-        x_api_key (str): API key for accessing the vector database.
-
-    Returns:
-        bool: True if the API key is valid, False otherwise.
-    """
-    try:
-        if not x_api_key:
-            x_api_key = ""
-
-        response = SESSION.get(
-            f"{VECTOR_SEARCH_URI}/item/query/?query=",
-            headers={
-                "x-api-secret": x_api_key,
-                "User-Agent": USER_AGENT,
-            },
-        )
-        return response.status_code != 401
-    except Exception:
-        return False
-
-
-async def vectorsearch(
-    query: str, x_api_key: str, type: str = "item", limit: int = 10, lang: str = "en", user_agent=""
-) -> list:
+async def vectorsearch(query: str, type: str = "item", limit: int = 10, lang: str = "en", user_agent="") -> list:
     """Searches for Wikidata items or properties similar to the input text using a vector database.
 
     Args:
@@ -113,9 +86,10 @@ async def vectorsearch(
         f"{VECTOR_SEARCH_URI}/{type}/query/",
         params={
             "query": query,
+            "lang": lang,
             "k": limit,
         },
-        headers={"x-api-secret": x_api_key, "User-Agent": f"{USER_AGENT} ({user_agent})"},
+        headers={"User-Agent": f"{USER_AGENT} ({user_agent})"},
     )
     response.raise_for_status()
 
@@ -145,7 +119,7 @@ async def execute_sparql(sparql_query: str, K: int = 10, user_agent="") -> pd.Da
             "query": sparql_query,
             "format": "json",
         },
-        headers={"User-Agent": f"{USER_AGENT} ({user_agent})"}
+        headers={"User-Agent": f"{USER_AGENT} ({user_agent})"},
     )
 
     if result.status_code == 400:
@@ -166,7 +140,7 @@ async def execute_sparql(sparql_query: str, K: int = 10, user_agent="") -> pd.Da
         match = URI_RE.match(val)
         return match.group(1) if match else val
 
-    df = df.applymap(shorten)
+    df = df.apply(lambda col: col.map(shorten))
     df = df.head(K)
     return df
 
@@ -271,44 +245,6 @@ async def get_entities_triplets(
     info = response.json()
 
     return info
-
-
-async def get_claims(qid: str, pid: str, lang: str = "en") -> dict:
-    """Fetches claim values for a given Wikidata QID and PID.
-
-    Args:
-        qid (str): The Wikidata QID to fetch claim data for.
-        pid (str): The Wikidata PID to fetch claim data for.
-        lang (str, optional): Language code available on Wikidata. Default to en.
-
-    Returns:
-        dict: A dictionary where keys are entity IDs and values are their RDF triplet representations as strings.
-    """
-    if not qid or not pid:
-        return {}
-
-    params = {
-        "action": "wbgetclaims",
-        "entity": qid,
-        "property": pid,
-        "format": "json",
-        "origin": "*",
-    }
-    response = SESSION.get(
-        WD_API_URI,
-        params=params,
-        headers={"User-Agent": USER_AGENT},
-    )
-    response.raise_for_status()
-    entities_data = response.json().get("claims", {})
-
-    claim_values = []
-    for claim in entities_data.get(pid, []):
-        mainsnak = claim.get("mainsnak", {})
-        datavalue = mainsnak.get("datavalue", {})
-        if "value" in datavalue:
-            claim_values.append(datavalue["value"])
-    return claim_values
 
 
 async def get_triplet_values(
