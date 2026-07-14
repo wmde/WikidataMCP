@@ -3,99 +3,105 @@
 import json
 import re
 
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_ollama import ChatOllama
-from pydantic import BaseModel, Field
-
-SYSTEM_PROMPT = """\
-You are validating a Wikidata SPARQL query against its execution result.
-
-Accept it only when the result plausibly answers the user's question.
-When refinement is needed, return a complete corrected query using only allowed identifiers.
-Preserve all valid values for multi-valued relationships.
-Never add LIMIT merely to hide valid rows or make an answer appear simpler.
-Do not infer the meaning of an unlabeled identifier unless verified relationships support it.
-Never invent QIDs or PIDs.
-"""
-
-ERROR_PREFIXES = (
-    "MCP error",
-    "SPARQL query returned no data",
-    "Unexpected server error",
-    "Wikidata is currently unavailable",
-)
-UPDATE_KEYWORDS = ("INSERT", "DELETE", "LOAD", "CLEAR", "CREATE", "DROP", "MOVE", "COPY", "ADD")
-WIKIDATA_ID_PATTERN = re.compile(r"\b([PQ]\d+)\b")
+from steps.agent import AgentStep
 
 
-class ValidationOutput(BaseModel):
-    """Semantic validation and optional query refinement."""
+class ValidateSparqlStep(AgentStep):
+    """Execute, validate, and refine generated SPARQL."""
 
-    accepted: bool = Field(description="Whether the query and result answer the question.")
-    reason: str = Field(description="Brief validation explanation.")
-    refined_sparql: str = Field(default="", description="Complete corrected query when refinement is needed.")
+    TOOL_NAMES = ("execute_sparql",)
+    TOOL_CALL_LIMIT = 5
+    SYSTEM_PROMPT = """\
+    You are validating a Wikidata SPARQL query against its execution result.
 
+    Accept it only when the result plausibly answers the user's question.
+    When refinement is needed, return a complete corrected query using only allowed identifiers.
+    Preserve all valid values for multi-valued relationships.
+    Never add LIMIT merely to hide valid rows or make an answer appear simpler.
+    Do not infer the meaning of an unlabeled identifier unless verified relationships support it.
+    Never invent QIDs or PIDs.
+    """
 
-async def run(
-    state: dict,
-    model_name: str,
-    mcp_url: str,
-    max_attempts: int = 3,
-) -> dict:
-    """Execute and refine SPARQL while enforcing evidence-grounded identifiers."""
-    print("\n=== Step 4: Validate SPARQL ===", flush=True)
-    client = MultiServerMCPClient(
-        {
-            "wikidata": {
-                "transport": "streamable_http",
-                "url": mcp_url
-            }
+    def __init__(self, model_name: str, mcp_url: str, max_attempts: int = 3) -> None:
+        """Configure the SPARQL-validation step."""
+        super().__init__(model_name=model_name, mcp_url=mcp_url)
+        self.max_attempts = max_attempts
+
+    async def run(self, state: dict) -> dict:
+        """Execute and refine SPARQL until accepted or attempts are exhausted."""
+        print("\n=== Step 4: Validate SPARQL ===", flush=True)
+        await self.setup()
+
+        query = state["sparql"]
+        result_text = ""
+        final_reason = state["validation_reason"]
+
+        for attempt in range(1, self.max_attempts + 1):
+            finalized = await self.finalize(state, {"query": query})
+            output = finalized["output"]
+            result_text = finalized["result_text"]
+            issue = finalized["issue"]
+            final_reason = output.reason
+
+            if output.accepted and not issue:
+                print(f"Accepted on attempt {attempt}: {output.reason}")
+                break
+
+            refined = output.refined_sparql.strip()
+            if not refined or refined == query:
+                print(f"Stopped on attempt {attempt}: {output.reason}")
+                break
+            if attempt == self.max_attempts:
+                final_reason = f"{output.reason} Refinement was not executed because the attempt limit was reached."
+                break
+
+            query = refined
+            print(f"Refining after attempt {attempt}: {output.reason}")
+
+        return {
+            **state,
+            "sparql": query,
+            "result": result_text,
+            "validation_reason": final_reason,
         }
-    )
-    tools = {tool.name: tool for tool in await client.get_tools()}
-    if "execute_sparql" not in tools:
-        raise ValueError("MCP server is missing tool: execute_sparql")
-    model = ChatOllama(model=model_name, temperature=0).with_structured_output(ValidationOutput)
-    query = state["sparql"]
-    result_text = ""
-    final_reason = state["validation_reason"]
-    allowed_ids = set(WIKIDATA_ID_PATTERN.findall("\n".join(state["evidence"])))
-    relationships = "\n- ".join(state["relationships"]) or "none"
 
-    for attempt in range(1, max_attempts + 1):
+    async def finalize(self, state: dict, result: dict) -> dict:
+        """Execute one query and semantically verify its result."""
+        query = result["query"]
+        allowed_ids = set(WIKIDATA_ID_PATTERN.findall("\n".join(state["evidence"])))
         unsupported = set(WIKIDATA_ID_PATTERN.findall(query)) - allowed_ids
         issue = ""
         if unsupported:
             issue = f"Unsupported identifiers: {', '.join(sorted(unsupported))}"
         elif any(re.search(rf"\b{keyword}\b", query.upper()) for keyword in UPDATE_KEYWORDS):
             issue = "Only read-only SPARQL queries are allowed."
-        if issue:
-            result_text = issue
-        else:
+
+        result_text = issue
+        if not issue:
             try:
-                result = await tools["execute_sparql"].ainvoke({"sparql": query, "K": 10})
-                if isinstance(result, tuple) and result:
-                    result = result[0]
-                if isinstance(result, list):
+                execution_result = await self.tools["execute_sparql"].ainvoke({"sparql": query, "K": 10})
+                if isinstance(execution_result, tuple) and execution_result:
+                    execution_result = execution_result[0]
+                if isinstance(execution_result, list):
                     blocks = [
                         block["text"]
-                        for block in result
+                        for block in execution_result
                         if isinstance(block, dict)
                         and block.get("type") == "text"
                         and isinstance(block.get("text"), str)
                     ]
-                    result_text = "\n".join(blocks) if blocks else json.dumps(result, ensure_ascii=False)
-                elif isinstance(result, str):
-                    result_text = result
+                    result_text = "\n".join(blocks) if blocks else json.dumps(execution_result, ensure_ascii=False)
+                elif isinstance(execution_result, str):
+                    result_text = execution_result
                 else:
-                    result_text = json.dumps(result, ensure_ascii=False)
+                    result_text = json.dumps(execution_result, ensure_ascii=False)
             except Exception as exc:
                 issue = f"Execution failed: {exc}"
                 result_text = issue
             if result_text.startswith(ERROR_PREFIXES):
                 issue = result_text
 
+        relationships = "\n- ".join(state["relationships"]) or "none"
         prompt = (
             f"Question: {state['question']}\n\n"
             f"SPARQL:\n{query}\n\n"
@@ -104,29 +110,8 @@ async def run(
             f"Mechanical issue: {issue or 'none'}\n"
             f"Allowed identifiers: {', '.join(allowed_ids) or 'none'}"
         )
-        output = await model.ainvoke([SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=prompt)])
+        agent_result = await self.invoke_agent({"messages": [{"role": "user", "content": prompt}]}, "validate sparql")
+        output = agent_result["structured_response"]
         if not isinstance(output, ValidationOutput):
             output = ValidationOutput.model_validate(output)
-        final_reason = output.reason
-
-        if output.accepted and not issue:
-            print(f"Accepted on attempt {attempt}: {output.reason}")
-            break
-
-        refined = output.refined_sparql.strip()
-        if not refined or refined == query:
-            print(f"Stopped on attempt {attempt}: {output.reason}")
-            break
-        if attempt == max_attempts:
-            final_reason = f"{output.reason} Refinement was not executed because the attempt limit was reached."
-            break
-
-        query = refined
-        print(f"Refining after attempt {attempt}: {output.reason}")
-
-    return {
-        **state,
-        "sparql": query,
-        "result": result_text,
-        "validation_reason": final_reason,
-    }
+        return {"output": output, "result_text": result_text, "issue": issue}

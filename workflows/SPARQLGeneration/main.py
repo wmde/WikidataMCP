@@ -3,25 +3,26 @@
 import argparse
 import asyncio
 from collections.abc import Sequence
-from functools import partial
 
 from langgraph.graph import END, START, StateGraph
-from steps import discover, generate_sparql, inspect_structure, validate_sparql
+from steps.discover import DiscoverStep
+from steps.generate_sparql import GenerateSparqlStep
+from steps.inspect_structure import InspectStructureStep
+from steps.validate_sparql import ValidateSparqlStep
 
 
 async def run_workflow(question: str, model_name: str, mcp_url: str) -> dict:
     """Build and run the complete SPARQL generation workflow."""
+    discover = DiscoverStep(model_name=model_name, mcp_url=mcp_url)
+    inspect_structure = InspectStructureStep(model_name=model_name, mcp_url=mcp_url)
+    generate_sparql = GenerateSparqlStep(model_name=model_name)
+    validate_sparql = ValidateSparqlStep(model_name=model_name, mcp_url=mcp_url)
+
     builder = StateGraph(dict)
-    builder.add_node("discover", partial(discover.run, model_name=model_name, mcp_url=mcp_url))
-    builder.add_node(
-        "inspect_structure",
-        partial(inspect_structure.run, model_name=model_name, mcp_url=mcp_url),
-    )
-    builder.add_node("generate_sparql", partial(generate_sparql.run, model_name=model_name))
-    builder.add_node(
-        "validate_sparql",
-        partial(validate_sparql.run, model_name=model_name, mcp_url=mcp_url),
-    )
+    builder.add_node("discover", discover.run)
+    builder.add_node("inspect_structure", inspect_structure.run)
+    builder.add_node("generate_sparql", generate_sparql.run)
+    builder.add_node("validate_sparql", validate_sparql.run)
 
     builder.add_edge(START, "discover")
     builder.add_edge("discover", "inspect_structure")
@@ -34,6 +35,8 @@ async def run_workflow(question: str, model_name: str, mcp_url: str) -> dict:
             "question": question,
             "relevant_qids": [],
             "relevant_pids": [],
+            "relevant_items": [],
+            "relevant_properties": [],
             "evidence": [],
             "relationships": [],
             "sparql_hints": "",

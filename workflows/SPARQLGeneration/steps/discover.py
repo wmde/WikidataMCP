@@ -1,116 +1,169 @@
 """Step 1: discover relevant Wikidata entities and properties."""
 
-import asyncio
-import json
-import re
-
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_ollama import ChatOllama
-from pydantic import BaseModel, Field
-
-TOOL_NAMES = ("search_items", "search_properties")
-WIKIDATA_ID_PATTERN = re.compile(r"\b([PQ]\d+)\b")
-
-SYSTEM_PROMPT = """\
-You are discovering Wikidata identifiers needed to answer a question.
-
-Use search_items and search_properties with varied natural-language searches.
-Select only QIDs and PIDs that visibly occur in the tool results.
-Stop searching once you have enough identifiers to answer the question.
-Do not use memorized or invented identifiers.
-"""
+from steps.agent import AgentStep
 
 
-class DiscoveryOutput(BaseModel):
-    """Relevant identifiers selected from search results."""
+class DiscoverStep(AgentStep):
+    """Discover and verify candidate Wikidata identifiers."""
 
-    relevant_qids: list[str] = Field(description="Relevant QIDs visible in search results.")
-    relevant_pids: list[str] = Field(description="Relevant PIDs visible in search results.")
-    reasoning: str = Field(description="Brief explanation of why these identifiers matter.")
+    TOOL_NAMES = (
+        "search_items",
+        "search_properties",
+        "get_statements",
+        "get_statement_values",
+        "get_instance_and_subclass_hierarchy"
+    )
+    TOOL_CALL_LIMIT = 3
+    SYSTEM_PROMPT = """You are an evidence-gathering step, not a problem-solving or query-writing step.
 
+    Allowed actions:
+    - Use the provided Wikidata tools to search and inspect relevant entities, properties, statements, and hierarchy.
+    - Summarize only information grounded in tool results.
 
-async def run(state: dict, model_name: str, mcp_url: str) -> dict:
-    """Discover and verify candidate QIDs and PIDs."""
-    print("\n=== Step 1: Discover ===", flush=True)
-    client = MultiServerMCPClient(
-        {
-            "wikidata": {
-                "transport": "streamable_http",
-                "url": mcp_url
+    Report only information useful for a later agent to write SPARQL:
+    - Useful entities: QIDs needed as fixed values, anchors, or domain concepts in the query.
+    - Useful relationships: PIDs needed as graph edges or filters.
+    - Useful classes: QIDs from instance-of/subclass-of evidence that help restrict or filter results.
+    - Example items: concrete Wikidata items that show how this domain is modeled, including their relevant statements and relationships.
+
+    If information is missing, use the tools to search or inspect more.
+    Do not perform actions outside the provided tools or describe hypothetical procedures.
+    Do not ask the user follow-up questions.
+    Do not answer the original question directly.
+    """  # noqa: E501
+
+    async def run(self, state: dict) -> dict:
+        """Run discovery and return the verified workflow state."""
+        print("\n=== Step 1: Discover ===", flush=True)
+        search_messages = await self.run_search(state)
+        inspect_messages = await self.run_inspect(state, search_messages)
+        state = await self.run_summary(state, inspect_messages)
+        return state
+
+    async def run_search(self, state: dict) -> dict:
+        """Search tools only."""
+        print("\n=== Step 1.1: Search ===", flush=True)
+        self.agent = None
+        self.TOOL_NAMES = (
+            "search_items",
+            "search_properties"
+        )
+        self.TOOL_CALL_LIMIT = 2
+        await self.setup()
+
+        print(f"  [tool-call] search_items args={{'query': {state['question']!r}}}", flush=True)
+        initial_item_result = await self.tools["search_items"].ainvoke({"query": state["question"]})
+        print(f"  [tool-call] search_properties args={{'query': {state['question']!r}}}", flush=True)
+        initial_property_result = await self.tools["search_properties"].ainvoke({"query": state["question"]})
+
+        initial_item_result = initial_item_result
+        initial_property_result = initial_property_result
+        result = await self.invoke_agent(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Question: `{state['question']}`\n\n"
+                            "Initial Wikidata searches were already performed\n"
+                            "search_items result:\n"
+                            f"{initial_item_result}\n\n"
+                            "search_properties result:\n"
+                            f"{initial_property_result}\n\n"
+                            "Continue gathering grounded Wikidata evidence for generating the SPARQL query."
+                        ),
+                    }
+                ]
             }
+        )
+
+        return result['messages']
+
+
+    async def run_inspect(self, state: dict, search_messages: list) -> dict:
+        """Inspect tools only."""
+        print("\n=== Step 1.2: Inspect ===", flush=True)
+        self.agent = None
+        self.TOOL_NAMES = (
+            "get_statements",
+            "get_statement_values",
+            "get_instance_and_subclass_hierarchy"
+        )
+        self.TOOL_CALL_LIMIT = 5
+        await self.setup()
+
+        result = await self.invoke_agent(
+            {
+                "messages": [
+                    *search_messages,
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Question: `{state['question']}`\n"
+                            "Continue gathering grounded Wikidata evidence for generating the SPARQL query."
+                        ),
+                    }
+                ]
+            }
+        )
+
+        return result['messages']
+
+    async def run_verification(self, state: dict) -> dict:
+        """Verify the grounded evidence."""
+        print("\n=== Step 1.4: Verification ===", flush=True)
+
+        messages = []
+        tool_prompts = {
+            "get_statements": "Inspect each entity mentioned in the discovery summary and enrich the summary with missing or incorrect relationships and entity IDs.",
+            "get_statement_values": "Inspect each relationship mentioned in the discovery summary and enrich the summary with missing or incorrect relationships and entity IDs.",
+            "get_instance_and_subclass_hierarchy": "Inspect the instance and subclass hierarchy of entities to find the correct entity class to filter on."
         }
-    )
-    available_tools = {tool.name: tool for tool in await client.get_tools()}
-    missing = set(TOOL_NAMES) - available_tools.keys()
-    if missing:
-        raise ValueError(f"MCP server is missing tools: {', '.join(sorted(missing))}")
-    tools = {name: available_tools[name] for name in TOOL_NAMES}
+        for tool_name, prompt in tool_prompts.items():
+            self.agent = None
+            self.TOOL_NAMES = (tool_name,)
+            self.TOOL_CALL_LIMIT = 5
+            await self.setup()
 
-    model = ChatOllama(model=model_name, temperature=0)
-    model_with_tools = model.bind_tools(list(tools.values()))
-    messages: list[BaseMessage] = [HumanMessage(content=f"Question: {state['question']}")]
-
-    for _ in range(5):
-        response = await model_with_tools.ainvoke([SystemMessage(content=SYSTEM_PROMPT), *messages])
-        messages.append(response)
-        if not response.tool_calls:
-            break
-
-        for call in response.tool_calls:
-            name = call["name"]
-            print(f"  [tool] {name}({call['args']})", flush=True)
-            try:
-                async with asyncio.timeout(35):
-                    result = await tools[name].ainvoke(call["args"])
-                if isinstance(result, tuple) and result:
-                    result = result[0]
-                if isinstance(result, list):
-                    blocks = [
-                        block["text"]
-                        for block in result
-                        if isinstance(block, dict)
-                        and block.get("type") == "text"
-                        and isinstance(block.get("text"), str)
+            result = await self.invoke_agent(
+                {
+                    "messages": [
+                        *messages,
+                        {
+                            "role": "user",
+                            "content": (
+                                f"Question: `{state['question']}`\n"
+                                f"Discovery Summary: {state['discovery_summary']}\n"
+                                f"{prompt}"
+                            ),
+                        }
                     ]
-                    result = "\n".join(blocks) if blocks else json.dumps(result, ensure_ascii=False)
-                elif not isinstance(result, str):
-                    result = json.dumps(result, ensure_ascii=False)
-                message = ToolMessage(content=result, name=name, tool_call_id=call["id"])
-            except Exception as exc:
-                message = ToolMessage(
-                    content=f"Tool failed: {exc}",
-                    name=name,
-                    tool_call_id=call["id"],
-                    status="error",
-                )
-            messages.append(message)
+                }
+            )
+            messages = result['messages']
 
-    structured_model = model.with_structured_output(DiscoveryOutput)
-    output = await structured_model.ainvoke(
-        [
-            SystemMessage(content=SYSTEM_PROMPT),
-            *messages,
-            HumanMessage(content="Return your findings in the required structured format."),
-        ]
-    )
-    if not isinstance(output, DiscoveryOutput):
-        output = DiscoveryOutput.model_validate(output)
-    evidence = [
-        f"{message.name}:\n{message.content}"
-        for message in messages
-        if isinstance(message, ToolMessage) and message.name in TOOL_NAMES and message.status != "error"
-    ]
-    allowed_ids = set(WIKIDATA_ID_PATTERN.findall("\n".join(evidence)))
-    qids = list(dict.fromkeys(qid for qid in output.relevant_qids if qid in allowed_ids and qid.startswith("Q")))
-    pids = list(dict.fromkeys(pid for pid in output.relevant_pids if pid in allowed_ids and pid.startswith("P")))
+        return result['messages']
 
-    print(f"QIDs: {qids}")
-    print(f"PIDs: {pids}")
-    print(f"Reasoning: {output.reasoning}")
-    return {
-        **state,
-        "relevant_qids": qids,
-        "relevant_pids": pids,
-        "evidence": evidence,
-    }
+    async def run_summary(self, state: dict, inspect_messages: list) -> dict:
+        """Summarize the grounded evidence."""
+        print("\n=== Step 1.3: Summarize ===", flush=True)
+        self.remove_tools()
+        result = await self.invoke_agent(
+            {
+                "messages": [
+                    *inspect_messages,
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Question: {state['question']}\n"
+                            "Summarize the grounded Wikidata evidence needed to generate the SPARQL query."
+                        ),
+                    },
+                ]
+            }
+        )
+
+        return {
+            **state,
+            'discovery_summary': result['messages'][-1].content
+        }
