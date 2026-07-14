@@ -1,7 +1,7 @@
-"""Reusable abstract base for SPARQL workflow agents."""
+"""Factory utilities for SPARQL workflow agents."""
 
-from abc import ABC, abstractmethod
-from typing import Any, ClassVar
+from dataclasses import dataclass
+from typing import Any
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import ToolCallLimitMiddleware
@@ -11,69 +11,17 @@ from langchain_ollama import ChatOllama
 from pydantic import BaseModel
 
 
-class AgentStep(ABC):
-    """Base lifecycle for model-backed workflow steps."""
+@dataclass
+class AgentRunner:
+    """Configured agent plus the MCP tools selected for it."""
 
-    SYSTEM_PROMPT: ClassVar[str]
-    OUTPUT_MODEL: ClassVar[type[BaseModel] | None] = None
-    TOOL_NAMES: ClassVar[tuple[str, ...]] = ()
-    TOOL_CALL_LIMIT: ClassVar[int | None] = None
+    agent: Any
+    tools: dict[str, Any]
 
-    def __init__(self, model_name: str, mcp_url: str | None = None) -> None:
-        """Configure shared model and MCP settings."""
-        self.model_name = model_name
-        self.mcp_url = mcp_url
-        self.tools: dict[str, Any] = {}
-        self.agent: Any | None = None
-
-    async def setup(self) -> None:
-        """Load required MCP tools and create the structured agent once."""
-        if self.agent is not None:
-            return
-
-        # Preapre tools
-        if self.TOOL_NAMES:
-            if self.mcp_url is None:
-                raise ValueError(f"{type(self).__name__} requires an MCP URL.")
-            client = MultiServerMCPClient({"wikidata": {"transport": "streamable_http", "url": self.mcp_url}})
-            available_tools = {tool.name: tool for tool in await client.get_tools()}
-            missing = set(self.TOOL_NAMES) - available_tools.keys()
-            if missing:
-                raise ValueError(f"MCP server is missing tools: {', '.join(sorted(missing))}")
-            self.tools = {name: available_tools[name] for name in self.TOOL_NAMES}
-
-        middleware = []
-        if self.TOOL_CALL_LIMIT is not None:
-            middleware.extend(
-                ToolCallLimitMiddleware(tool_name=tool_name, run_limit=self.TOOL_CALL_LIMIT, exit_behavior="continue")
-                for tool_name in self.TOOL_NAMES
-            )
-
-        # creat agent
-        agent_kwargs = {
-            "model": ChatOllama(model=self.model_name, temperature=0),
-            "tools": list(self.tools.values()),
-            "system_prompt": self.SYSTEM_PROMPT,
-            "middleware": middleware or [],
-        }
-        if self.OUTPUT_MODEL:
-            agent_kwargs["response_format"] = ToolStrategy(self.OUTPUT_MODEL)
-        self.agent = create_agent(**agent_kwargs)
-
-    def remove_tools(self) -> Any:
-        """Setup the agent without tools."""
-        agent_kwargs = {
-            "model": ChatOllama(model=self.model_name, temperature=0),
-            "system_prompt": self.SYSTEM_PROMPT,
-        }
-        if self.OUTPUT_MODEL:
-            agent_kwargs["response_format"] = ToolStrategy(self.OUTPUT_MODEL)
-        self.agent = create_agent(**agent_kwargs)
-
-    async def invoke_agent(self, payload: dict) -> dict:
-        """Invoke this step's agent while streaming model text."""
-        if self.agent is None:
-            raise ValueError(f"{type(self).__name__} agent is not configured.")
+    async def invoke_agent(self, payload: dict, label: str | None = None) -> dict:
+        """Invoke this configured agent while streaming model text."""
+        if label:
+            print(f"  [agent] {label}", flush=True)
 
         result = {"messages": list(payload.get("messages", []))}
         streamed_text = False
@@ -192,6 +140,50 @@ class AgentStep(ABC):
             if "structured_response" in node_update:
                 result["structured_response"] = node_update["structured_response"]
 
-    @abstractmethod
-    async def run(self, state: dict) -> dict:
-        """Execute the workflow step."""
+
+class AgentFactory:
+    """Create configured model-backed workflow agents."""
+
+    def __init__(self, model_name: str, mcp_url: str | None = None) -> None:
+        """Configure shared model and MCP settings."""
+        self.model_name = model_name
+        self.mcp_url = mcp_url
+
+    async def create(
+        self,
+        *,
+        system_prompt: str,
+        output_model: type[BaseModel] | None = None,
+        tool_names: tuple[str, ...] = (),
+        tool_call_limit: int | None = None,
+    ) -> AgentRunner:
+        """Create an agent runner with the requested prompt, output schema, and tools."""
+        tools = await self._load_tools(tool_names)
+        middleware = [
+            ToolCallLimitMiddleware(tool_name=tool_name, run_limit=tool_call_limit, exit_behavior="continue")
+            for tool_name in tool_names
+            if tool_call_limit is not None
+        ]
+        agent_kwargs = {
+            "model": ChatOllama(model=self.model_name, temperature=0),
+            "tools": list(tools.values()),
+            "system_prompt": system_prompt,
+            "middleware": middleware,
+        }
+        if output_model:
+            agent_kwargs["response_format"] = ToolStrategy(output_model)
+        return AgentRunner(agent=create_agent(**agent_kwargs), tools=tools)
+
+    async def _load_tools(self, tool_names: tuple[str, ...]) -> dict[str, Any]:
+        """Load selected MCP tools by name."""
+        if not tool_names:
+            return {}
+        if self.mcp_url is None:
+            raise ValueError("MCP URL is required when creating an agent with tools.")
+
+        client = MultiServerMCPClient({"wikidata": {"transport": "streamable_http", "url": self.mcp_url}})
+        available_tools = {tool.name: tool for tool in await client.get_tools()}
+        missing = set(tool_names) - available_tools.keys()
+        if missing:
+            raise ValueError(f"MCP server is missing tools: {', '.join(sorted(missing))}")
+        return {name: available_tools[name] for name in tool_names}

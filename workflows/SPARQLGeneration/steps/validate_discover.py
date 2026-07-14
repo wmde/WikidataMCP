@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, Field
 
-from steps.agent import AgentStep
+from steps.agent import AgentFactory
 
 
 class ValidationOutput(BaseModel):
@@ -16,7 +16,7 @@ class ValidationOutput(BaseModel):
     )
 
 
-class ValidateDiscoveryStep(AgentStep):
+class ValidateDiscoveryStep:
     """Execute, validate, and refine generated SPARQL."""
 
     TOOL_NAMES = (
@@ -41,12 +41,20 @@ class ValidateDiscoveryStep(AgentStep):
     Do not write SPARQL, answer the original question, or ask the user follow-up questions.
     """  # noqa: E501
 
+    def __init__(self, model_name: str, mcp_url: str) -> None:
+        """Configure the discovery-validation step."""
+        self.agent_factory = AgentFactory(model_name=model_name, mcp_url=mcp_url)
+
     async def run(self, state: dict) -> dict:
         """Execute and refine SPARQL until accepted or attempts are exhausted."""
         print("\n=== Step 2: Validate Discovery ===", flush=True)
-        await self.setup()
+        runner = await self.agent_factory.create(
+            system_prompt=self.SYSTEM_PROMPT,
+            output_model=ValidationOutput,
+            tool_names=self.TOOL_NAMES,
+        )
 
-        result = await self.invoke_agent(
+        result = await runner.invoke_agent(
             {
                 "messages": [
                     {

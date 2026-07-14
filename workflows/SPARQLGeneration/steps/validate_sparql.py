@@ -3,10 +3,10 @@
 import json
 import re
 
-from steps.agent import AgentStep
+from steps.agent import AgentFactory, AgentRunner
 
 
-class ValidateSparqlStep(AgentStep):
+class ValidateSparqlStep:
     """Execute, validate, and refine generated SPARQL."""
 
     TOOL_NAMES = ("execute_sparql",)
@@ -24,20 +24,24 @@ class ValidateSparqlStep(AgentStep):
 
     def __init__(self, model_name: str, mcp_url: str, max_attempts: int = 3) -> None:
         """Configure the SPARQL-validation step."""
-        super().__init__(model_name=model_name, mcp_url=mcp_url)
+        self.agent_factory = AgentFactory(model_name=model_name, mcp_url=mcp_url)
         self.max_attempts = max_attempts
 
     async def run(self, state: dict) -> dict:
         """Execute and refine SPARQL until accepted or attempts are exhausted."""
         print("\n=== Step 4: Validate SPARQL ===", flush=True)
-        await self.setup()
+        runner = await self.agent_factory.create(
+            system_prompt=self.SYSTEM_PROMPT,
+            tool_names=self.TOOL_NAMES,
+            tool_call_limit=self.TOOL_CALL_LIMIT,
+        )
 
         query = state["sparql"]
         result_text = ""
         final_reason = state["validation_reason"]
 
         for attempt in range(1, self.max_attempts + 1):
-            finalized = await self.finalize(state, {"query": query})
+            finalized = await self.finalize(state, {"query": query}, runner)
             output = finalized["output"]
             result_text = finalized["result_text"]
             issue = finalized["issue"]
@@ -65,7 +69,7 @@ class ValidateSparqlStep(AgentStep):
             "validation_reason": final_reason,
         }
 
-    async def finalize(self, state: dict, result: dict) -> dict:
+    async def finalize(self, state: dict, result: dict, runner: AgentRunner) -> dict:
         """Execute one query and semantically verify its result."""
         query = result["query"]
         allowed_ids = set(WIKIDATA_ID_PATTERN.findall("\n".join(state["evidence"])))
@@ -79,7 +83,7 @@ class ValidateSparqlStep(AgentStep):
         result_text = issue
         if not issue:
             try:
-                execution_result = await self.tools["execute_sparql"].ainvoke({"sparql": query, "K": 10})
+                execution_result = await runner.tools["execute_sparql"].ainvoke({"sparql": query, "K": 10})
                 if isinstance(execution_result, tuple) and execution_result:
                     execution_result = execution_result[0]
                 if isinstance(execution_result, list):
@@ -110,7 +114,7 @@ class ValidateSparqlStep(AgentStep):
             f"Mechanical issue: {issue or 'none'}\n"
             f"Allowed identifiers: {', '.join(allowed_ids) or 'none'}"
         )
-        agent_result = await self.invoke_agent({"messages": [{"role": "user", "content": prompt}]}, "validate sparql")
+        agent_result = await runner.invoke_agent({"messages": [{"role": "user", "content": prompt}]}, "validate sparql")
         output = agent_result["structured_response"]
         if not isinstance(output, ValidationOutput):
             output = ValidationOutput.model_validate(output)

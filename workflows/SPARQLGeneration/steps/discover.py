@@ -1,9 +1,9 @@
 """Step 1: discover relevant Wikidata entities and properties."""
 
-from steps.agent import AgentStep
+from steps.agent import AgentFactory
 
 
-class DiscoverStep(AgentStep):
+class DiscoverStep:
     """Discover and verify candidate Wikidata identifiers."""
 
     TOOL_NAMES = (
@@ -14,23 +14,27 @@ class DiscoverStep(AgentStep):
         "get_instance_and_subclass_hierarchy"
     )
     TOOL_CALL_LIMIT = 3
-    SYSTEM_PROMPT = """You are an evidence-gathering step, not a problem-solving or query-writing step.
+    SYSTEM_PROMPT = """You are an evidence-gathering agent, not a problem-solving or query-writing step. You goal is to explore Wikidata and write a summary of found information to prepare the next agent to write a SPARQL query.
 
     Allowed actions:
     - Use the provided Wikidata tools to search and inspect relevant entities, properties, statements, and hierarchy.
-    - Summarize only information grounded in tool results.
+    - Write a summary of information grounded in tool results.
 
-    Report only information useful for a later agent to write SPARQL:
+    Report information useful for a later agent to write SPARQL:
     - Useful entities: QIDs needed as fixed values, anchors, or domain concepts in the query.
-    - Useful relationships: PIDs needed as graph edges or filters.
+    - Useful relationships: QID and PID pairs needed as graph edges or filters.
     - Useful classes: QIDs from instance-of/subclass-of evidence that help restrict or filter results.
-    - Example items: concrete Wikidata items that show how this domain is modeled, including their relevant statements and relationships.
+    - Example items: concrete Wikidata items with QIDs that show how this domain is modeled, including their relevant statements and relationships.
 
     If information is missing, use the tools to search or inspect more.
     Do not perform actions outside the provided tools or describe hypothetical procedures.
     Do not ask the user follow-up questions.
-    Do not answer the original question directly.
+    Do not answer the original question directly or write a SPARQL query.
     """  # noqa: E501
+
+    def __init__(self, model_name: str, mcp_url: str) -> None:
+        """Configure the discovery step."""
+        self.agent_factory = AgentFactory(model_name=model_name, mcp_url=mcp_url)
 
     async def run(self, state: dict) -> dict:
         """Run discovery and return the verified workflow state."""
@@ -43,22 +47,20 @@ class DiscoverStep(AgentStep):
     async def run_search(self, state: dict) -> dict:
         """Search tools only."""
         print("\n=== Step 1.1: Search ===", flush=True)
-        self.agent = None
-        self.TOOL_NAMES = (
-            "search_items",
-            "search_properties"
+        runner = await self.agent_factory.create(
+            system_prompt=self.SYSTEM_PROMPT,
+            tool_names=("search_items", "search_properties"),
+            tool_call_limit=2,
         )
-        self.TOOL_CALL_LIMIT = 2
-        await self.setup()
 
         print(f"  [tool-call] search_items args={{'query': {state['question']!r}}}", flush=True)
-        initial_item_result = await self.tools["search_items"].ainvoke({"query": state["question"]})
+        initial_item_result = await runner.tools["search_items"].ainvoke({"query": state["question"]})
         print(f"  [tool-call] search_properties args={{'query': {state['question']!r}}}", flush=True)
-        initial_property_result = await self.tools["search_properties"].ainvoke({"query": state["question"]})
+        initial_property_result = await runner.tools["search_properties"].ainvoke({"query": state["question"]})
 
         initial_item_result = initial_item_result
         initial_property_result = initial_property_result
-        result = await self.invoke_agent(
+        result = await runner.invoke_agent(
             {
                 "messages": [
                     {
@@ -83,16 +85,13 @@ class DiscoverStep(AgentStep):
     async def run_inspect(self, state: dict, search_messages: list) -> dict:
         """Inspect tools only."""
         print("\n=== Step 1.2: Inspect ===", flush=True)
-        self.agent = None
-        self.TOOL_NAMES = (
-            "get_statements",
-            "get_statement_values",
-            "get_instance_and_subclass_hierarchy"
+        runner = await self.agent_factory.create(
+            system_prompt=self.SYSTEM_PROMPT,
+            tool_names=("get_statements", "get_statement_values", "get_instance_and_subclass_hierarchy"),
+            tool_call_limit=5,
         )
-        self.TOOL_CALL_LIMIT = 5
-        await self.setup()
 
-        result = await self.invoke_agent(
+        result = await runner.invoke_agent(
             {
                 "messages": [
                     *search_messages,
@@ -115,17 +114,18 @@ class DiscoverStep(AgentStep):
 
         messages = []
         tool_prompts = {
-            "get_statements": "Inspect each entity mentioned in the discovery summary and enrich the summary with missing or incorrect relationships and entity IDs.",
-            "get_statement_values": "Inspect each relationship mentioned in the discovery summary and enrich the summary with missing or incorrect relationships and entity IDs.",
-            "get_instance_and_subclass_hierarchy": "Inspect the instance and subclass hierarchy of entities to find the correct entity class to filter on."
+            "get_statements": "Inspect each entity mentioned in the discovery summary and enrich the summary with missing or incorrect relationships and entity IDs.",  # noqa: E501
+            "get_statement_values": "Inspect each relationship mentioned in the discovery summary and enrich the summary with missing or incorrect relationships and entity IDs.",  # noqa: E501
+            "get_instance_and_subclass_hierarchy": "Inspect the instance and subclass hierarchy of entities to find the correct entity class to filter on."  # noqa: E501
         }
         for tool_name, prompt in tool_prompts.items():
-            self.agent = None
-            self.TOOL_NAMES = (tool_name,)
-            self.TOOL_CALL_LIMIT = 5
-            await self.setup()
+            runner = await self.agent_factory.create(
+                system_prompt=self.SYSTEM_PROMPT,
+                tool_names=(tool_name,),
+                tool_call_limit=5,
+            )
 
-            result = await self.invoke_agent(
+            result = await runner.invoke_agent(
                 {
                     "messages": [
                         *messages,
@@ -147,8 +147,8 @@ class DiscoverStep(AgentStep):
     async def run_summary(self, state: dict, inspect_messages: list) -> dict:
         """Summarize the grounded evidence."""
         print("\n=== Step 1.3: Summarize ===", flush=True)
-        self.remove_tools()
-        result = await self.invoke_agent(
+        runner = await self.agent_factory.create(system_prompt=self.SYSTEM_PROMPT)
+        result = await runner.invoke_agent(
             {
                 "messages": [
                     *inspect_messages,

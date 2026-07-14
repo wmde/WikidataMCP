@@ -5,7 +5,7 @@ import os
 import requests
 from pydantic import BaseModel, Field
 
-from steps.agent import AgentStep
+from steps.agent import AgentFactory
 
 WD_QUERY_URI = os.environ.get("WD_QUERY_URI", "https://query.wikidata.org/sparql")
 USER_AGENT = os.environ.get("USER_AGENT", "Wikidata MCP SPARQL Generation (embedding@wikimedia.de)")
@@ -16,7 +16,7 @@ class SPARQLOutput(BaseModel):
     sparql: str = Field(description="One complete Wikidata SPARQL query.")
 
 
-class GenerateSparqlStep(AgentStep):
+class GenerateSparqlStep:
     """Generate and verify a grounded SPARQL query."""
 
     TOOL_NAMES = ("execute_sparql",)
@@ -30,6 +30,10 @@ class GenerateSparqlStep(AgentStep):
     Return only one complete SPARQL query.
     """  # noqa: E501
 
+    def __init__(self, model_name: str, mcp_url: str | None = None) -> None:
+        """Configure the SPARQL-generation step."""
+        self.agent_factory = AgentFactory(model_name=model_name, mcp_url=mcp_url)
+
     async def run(self, state: dict) -> dict:
         """Generate SPARQL and return its mechanically verified state."""
         print("\n=== Step 3: Generate SPARQL ===", flush=True)
@@ -40,13 +44,13 @@ class GenerateSparqlStep(AgentStep):
     async def run_with_tool(self, state: dict) -> dict:
         """Run the SPARQL generation step with tools."""
         print("\n=== Step 3.1: Test with MCP ===", flush=True)
-        self.agent = None
-        self.OUTPUT_MODEL = None
-        self.TOOL_NAMES = ("execute_sparql",)
-        self.TOOL_CALL_LIMIT = 5
-        await self.setup()
+        runner = await self.agent_factory.create(
+            system_prompt=self.SYSTEM_PROMPT,
+            tool_names=("execute_sparql",),
+            tool_call_limit=5,
+        )
 
-        result = await self.invoke_agent(
+        result = await runner.invoke_agent(
             {
                 "messages": [
                     {
@@ -66,10 +70,10 @@ class GenerateSparqlStep(AgentStep):
     async def run_sparql_generation(self, state: dict, messages: list) -> dict:
         """Run the SPARQL generation step without tools."""
         print("\n=== Step 3.2: Generate SPARQL ===", flush=True)
-        self.agent = None
-        self.OUTPUT_MODEL = SPARQLOutput
-        self.TOOL_NAMES = ()
-        await self.setup()
+        runner = await self.agent_factory.create(
+            system_prompt=self.SYSTEM_PROMPT,
+            output_model=SPARQLOutput,
+        )
 
         sparql = ""
         sparql_results = None
@@ -79,7 +83,7 @@ class GenerateSparqlStep(AgentStep):
         )
 
         for _ in range(5):
-            result = await self.invoke_agent(
+            result = await runner.invoke_agent(
                 {
                     "messages": [
                         *messages,
