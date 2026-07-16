@@ -1,35 +1,33 @@
-"""Step 1: discover relevant Wikidata entities and properties."""
+"""Step 1: search for relevant Wikidata entities and properties."""
 
 from steps.agent import AgentFactory
+from steps.workflow_utils import message_text, tool_result_to_text
 
 
 class DiscoverStep:
-    """Discover and verify candidate Wikidata identifiers."""
+    """Search for candidate Wikidata identifiers without inspecting structure."""
 
-    TOOL_NAMES = (
-        "search_items",
-        "search_properties",
-        "get_statements",
-        "get_statement_values",
-        "get_instance_and_subclass_hierarchy"
-    )
-    TOOL_CALL_LIMIT = 3
-    SYSTEM_PROMPT = """You are an evidence-gathering agent, not a problem-solving or query-writing step. You goal is to explore Wikidata and write a summary of found information to prepare the next agent to write a SPARQL query.
+    TOOL_NAMES = ("search_items", "search_properties")
+    TOOL_CALL_LIMIT = 4
+    SYSTEM_PROMPT = """\
+    You are Step 1 of a Wikidata SPARQL generation workflow: search only.
 
-    Allowed actions:
-    - Use the provided Wikidata tools to search and inspect relevant entities, properties, statements, and hierarchy.
-    - Write a summary of information grounded in tool results.
+    Your only job is to search for candidate Wikidata items and properties that may be relevant to the user's question.
+    Use search_items and search_properties.
+    Select relevant candidates and reject obvious false positives.
 
-    Report information useful for a later agent to write SPARQL:
-    - Useful entities: QIDs needed as fixed values, anchors, or domain concepts in the query.
-    - Useful relationships: QID and PID pairs needed as graph edges or filters.
-    - Useful classes: QIDs from instance-of/subclass-of evidence that help restrict or filter results.
-    - Example items: concrete Wikidata items with QIDs that show how this domain is modeled, including their relevant statements and relationships.
+    Treat search results as labels and descriptions only. Do not state that an item has a relationship, count, class,
+    example value, or counterexample value unless that exact fact appears in the search result text.
+    If a candidate might be an example or counterexample, say it is a candidate to inspect later.
+    Do not infer how Wikidata models the answer.
+    Do not decide which property or class the SPARQL query should use.
 
-    If information is missing, use the tools to search or inspect more.
-    Do not perform actions outside the provided tools or describe hypothetical procedures.
-    Do not ask the user follow-up questions.
-    Do not answer the original question directly or write a SPARQL query.
+    Write only a Step 1 search findings note. This is not the final discovery summary.
+    Include only candidates learned from search results:
+    - Relevant candidate items with QIDs, labels, and why each may matter.
+    - Relevant candidate properties with PIDs, labels, and why each may matter.
+    - Candidate example and counterexample items to inspect later, without claiming unverified relationships or counts.
+    - Rejected or distractor candidates in a separate section.
     """  # noqa: E501
 
     def __init__(self, model_name: str, mcp_url: str) -> None:
@@ -37,29 +35,23 @@ class DiscoverStep:
         self.agent_factory = AgentFactory(model_name=model_name, mcp_url=mcp_url)
 
     async def run(self, state: dict) -> dict:
-        """Run discovery and return the verified workflow state."""
-        print("\n=== Step 1: Discover ===", flush=True)
-        search_messages = await self.run_search(state)
-        inspect_messages = await self.run_inspect(state, search_messages)
-        state = await self.run_summary(state, inspect_messages)
-        return state
-
-    async def run_search(self, state: dict) -> dict:
-        """Search tools only."""
-        print("\n=== Step 1.1: Search ===", flush=True)
+        """Run search and return a prose candidate summary."""
+        print("\n=== Step 1: Search Candidates ===", flush=True)
         runner = await self.agent_factory.create(
             system_prompt=self.SYSTEM_PROMPT,
-            tool_names=("search_items", "search_properties"),
-            tool_call_limit=2,
+            tool_names=self.TOOL_NAMES,
+            tool_call_limit=self.TOOL_CALL_LIMIT,
         )
 
         print(f"  [tool-call] search_items args={{'query': {state['question']!r}}}", flush=True)
-        initial_item_result = await runner.tools["search_items"].ainvoke({"query": state["question"]})
+        initial_item_result = tool_result_to_text(
+            await runner.tools["search_items"].ainvoke({"query": state["question"]})
+        )
         print(f"  [tool-call] search_properties args={{'query': {state['question']!r}}}", flush=True)
-        initial_property_result = await runner.tools["search_properties"].ainvoke({"query": state["question"]})
+        initial_property_result = tool_result_to_text(
+            await runner.tools["search_properties"].ainvoke({"query": state["question"]})
+        )
 
-        initial_item_result = initial_item_result
-        initial_property_result = initial_property_result
         result = await runner.invoke_agent(
             {
                 "messages": [
@@ -72,98 +64,16 @@ class DiscoverStep:
                             f"{initial_item_result}\n\n"
                             "search_properties result:\n"
                             f"{initial_property_result}\n\n"
-                            "Continue gathering grounded Wikidata evidence for generating the SPARQL query."
+                            "Search further only if needed, then write the Step 1 candidate summary."
                         ),
                     }
                 ]
             }
         )
-
-        return result['messages']
-
-
-    async def run_inspect(self, state: dict, search_messages: list) -> dict:
-        """Inspect tools only."""
-        print("\n=== Step 1.2: Inspect ===", flush=True)
-        runner = await self.agent_factory.create(
-            system_prompt=self.SYSTEM_PROMPT,
-            tool_names=("get_statements", "get_statement_values", "get_instance_and_subclass_hierarchy"),
-            tool_call_limit=5,
-        )
-
-        result = await runner.invoke_agent(
-            {
-                "messages": [
-                    *search_messages,
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Question: `{state['question']}`\n"
-                            "Continue gathering grounded Wikidata evidence for generating the SPARQL query."
-                        ),
-                    }
-                ]
-            }
-        )
-
-        return result['messages']
-
-    async def run_verification(self, state: dict) -> dict:
-        """Verify the grounded evidence."""
-        print("\n=== Step 1.4: Verification ===", flush=True)
-
-        messages = []
-        tool_prompts = {
-            "get_statements": "Inspect each entity mentioned in the discovery summary and enrich the summary with missing or incorrect relationships and entity IDs.",  # noqa: E501
-            "get_statement_values": "Inspect each relationship mentioned in the discovery summary and enrich the summary with missing or incorrect relationships and entity IDs.",  # noqa: E501
-            "get_instance_and_subclass_hierarchy": "Inspect the instance and subclass hierarchy of entities to find the correct entity class to filter on."  # noqa: E501
-        }
-        for tool_name, prompt in tool_prompts.items():
-            runner = await self.agent_factory.create(
-                system_prompt=self.SYSTEM_PROMPT,
-                tool_names=(tool_name,),
-                tool_call_limit=5,
-            )
-
-            result = await runner.invoke_agent(
-                {
-                    "messages": [
-                        *messages,
-                        {
-                            "role": "user",
-                            "content": (
-                                f"Question: `{state['question']}`\n"
-                                f"Discovery Summary: {state['discovery_summary']}\n"
-                                f"{prompt}"
-                            ),
-                        }
-                    ]
-                }
-            )
-            messages = result['messages']
-
-        return result['messages']
-
-    async def run_summary(self, state: dict, inspect_messages: list) -> dict:
-        """Summarize the grounded evidence."""
-        print("\n=== Step 1.3: Summarize ===", flush=True)
-        runner = await self.agent_factory.create(system_prompt=self.SYSTEM_PROMPT)
-        result = await runner.invoke_agent(
-            {
-                "messages": [
-                    *inspect_messages,
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Question: {state['question']}\n"
-                            "Summarize the grounded Wikidata evidence needed to generate the SPARQL query."
-                        ),
-                    },
-                ]
-            }
-        )
+        search_summary = message_text(result)
 
         return {
             **state,
-            'discovery_summary': result['messages'][-1].content
+            "search_summary": search_summary,
+            "discovery_summary": search_summary,
         }

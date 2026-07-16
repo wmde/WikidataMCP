@@ -11,12 +11,16 @@ from steps.inspect_structure import InspectStructureStep
 from steps.validate_sparql import ValidateSparqlStep
 
 
-async def run_workflow(question: str, model_name: str, mcp_url: str) -> dict:
+async def run_workflow(question: str, model_name: str, mcp_url: str, max_refinement_cycles: int = 3) -> dict:
     """Build and run the complete SPARQL generation workflow."""
     discover = DiscoverStep(model_name=model_name, mcp_url=mcp_url)
     inspect_structure = InspectStructureStep(model_name=model_name, mcp_url=mcp_url)
-    generate_sparql = GenerateSparqlStep(model_name=model_name)
-    validate_sparql = ValidateSparqlStep(model_name=model_name, mcp_url=mcp_url)
+    generate_sparql = GenerateSparqlStep(model_name=model_name, mcp_url=mcp_url)
+    validate_sparql = ValidateSparqlStep(
+        model_name=model_name,
+        mcp_url=mcp_url,
+        max_refinement_cycles=max_refinement_cycles,
+    )
 
     builder = StateGraph(dict)
     builder.add_node("discover", discover.run)
@@ -28,23 +32,47 @@ async def run_workflow(question: str, model_name: str, mcp_url: str) -> dict:
     builder.add_edge("discover", "inspect_structure")
     builder.add_edge("inspect_structure", "generate_sparql")
     builder.add_edge("generate_sparql", "validate_sparql")
-    builder.add_edge("validate_sparql", END)
+    builder.add_conditional_edges(
+        "validate_sparql",
+        route_after_validation,
+        {
+            "refine": "generate_sparql",
+            "end": END,
+        },
+    )
 
     return await builder.compile().ainvoke(
         {
             "question": question,
-            "relevant_qids": [],
-            "relevant_pids": [],
-            "relevant_items": [],
-            "relevant_properties": [],
-            "evidence": [],
-            "relationships": [],
-            "sparql_hints": "",
+            "search_summary": "",
+            "discovery_summary": "",
+            "item_inspection_summary": "",
+            "statement_inspection_summary": "",
+            "class_inspection_summary": "",
+            "result_inspection_summary": "",
+            "statement_validation_summary": "",
+            "class_validation_summary": "",
+            "critique_summary": "",
+            "critique_history": [],
             "sparql": "",
+            "sparql_results": "",
+            "sparql_result_bindings": [],
+            "sparql_result_empty": False,
+            "sparql_error": "",
+            "sparql_history": [],
+            "result_history": [],
             "result": "",
             "validation_reason": "",
+            "refinement_cycle": 0,
+            "max_refinement_cycles": max_refinement_cycles,
+            "should_refine": False,
         }
     )
+
+
+def route_after_validation(state: dict) -> str:
+    """Choose whether to run another SPARQL generation cycle."""
+    return "refine" if state.get("should_refine") else "end"
 
 
 async def main(argv: Sequence[str] | None = None) -> None:
@@ -57,9 +85,20 @@ async def main(argv: Sequence[str] | None = None) -> None:
         default="https://wd-mcp.wmcloud.org/mcp/",
         help="Wikidata MCP streamable HTTP endpoint.",
     )
+    parser.add_argument(
+        "--max-refinement-cycles",
+        default=3,
+        type=int,
+        help="Maximum Step 5-8 refinement cycles.",
+    )
     args = parser.parse_args(argv)
 
-    state = await run_workflow(args.question, model_name=args.model, mcp_url=args.mcp_url)
+    state = await run_workflow(
+        args.question,
+        model_name=args.model,
+        mcp_url=args.mcp_url,
+        max_refinement_cycles=args.max_refinement_cycles,
+    )
 
     print("\n=== Final SPARQL ===")
     print(state["sparql"])

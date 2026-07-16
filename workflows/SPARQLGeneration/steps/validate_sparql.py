@@ -1,121 +1,229 @@
-"""Step 4: execute, validate, and refine generated SPARQL."""
+"""Steps 6-8: inspect SPARQL results and build refinement notes."""
 
-import json
-import re
+from __future__ import annotations
 
-from steps.agent import AgentFactory, AgentRunner
+from steps.agent import AgentFactory
+from steps.workflow_utils import (
+    compact_text,
+    message_text,
+)
 
 
 class ValidateSparqlStep:
-    """Execute, validate, and refine generated SPARQL."""
+    """Critique generated SPARQL/results with narrow inspection tools."""
 
-    TOOL_NAMES = ("execute_sparql",)
-    TOOL_CALL_LIMIT = 5
-    SYSTEM_PROMPT = """\
-    You are validating a Wikidata SPARQL query against its execution result.
+    RESULT_PROMPT = """\
+    You are Step 6 of a Wikidata SPARQL generation workflow: inspect result items.
 
-    Accept it only when the result plausibly answers the user's question.
-    When refinement is needed, return a complete corrected query using only allowed identifiers.
-    Preserve all valid values for multi-valued relationships.
-    Never add LIMIT merely to hide valid rows or make an answer appear simpler.
-    Do not infer the meaning of an unlabeled identifier unless verified relationships support it.
-    Never invent QIDs or PIDs.
-    """
+    Your only tool is get_statements. Use it to inspect items returned by the generated SPARQL.
+    Compare the result rows against the question and discovery summary.
+    Look for missing constraints, wrong result types, unexpected empty values, and false positives.
+    Compare result rows with any example and counterexample items in the discovery summary.
 
-    def __init__(self, model_name: str, mcp_url: str, max_attempts: int = 3) -> None:
-        """Configure the SPARQL-validation step."""
+    Write a result-item findings note.
+    Use discovery findings as context, but summarize only what this step learned from get_statements.
+    Include returned items inspected, false positives, missing constraints, unexpected empty values, and concrete
+    improvements the next SPARQL attempt may need.
+    Do not write a final critique or SPARQL plan.
+    """  # noqa: E501
+
+    STATEMENT_PROMPT = """\
+    You are Step 7 of a Wikidata SPARQL generation workflow: inspect result statement values.
+
+    Your only tool is get_statement_values. Use it to inspect relevant entity-property pairs from the generated SPARQL,
+    discovery summary, Step 6 critique, and returned result items.
+    Check whether statement values, qualifiers, ranks, or deprecated values make the current query too broad, too narrow, or wrong.
+    Pay special attention to properties whose values include both answer values and non-answer values.
+    Do not write SPARQL.
+
+    Write a result-statement findings note.
+    Use Step 6 as context, but summarize only what this step learned from get_statement_values.
+    Include statement values, qualifiers, ranks, deprecated-value concerns, and whether the current query is too
+    broad, too narrow, or using the wrong relationship.
+    """  # noqa: E501
+
+    HIERARCHY_PROMPT = """\
+    You are Step 8 of a Wikidata SPARQL generation workflow: inspect class assumptions.
+
+    Your only tool is get_instance_and_subclass_hierarchy. Use it to inspect class filters, returned result items,
+    and class-like QIDs used or implied by the generated SPARQL.
+    Check whether class filtering is correct, too broad, too narrow, missing subclass expansion, or using the wrong class.
+    Compare broad and narrow classes when counterexamples show that a generic class would overcount.
+    Do not write SPARQL.
+
+    Write a result-class findings note.
+    Use Step 6 as context, but summarize only what this step learned from get_instance_and_subclass_hierarchy.
+    Include class filters that are correct, too broad, too narrow, missing subclass expansion, or wrong.
+    """  # noqa: E501
+
+    def __init__(self, model_name: str, mcp_url: str, max_refinement_cycles: int = 3) -> None:
+        """Configure the SPARQL-validation stage."""
         self.agent_factory = AgentFactory(model_name=model_name, mcp_url=mcp_url)
-        self.max_attempts = max_attempts
+        self.max_refinement_cycles = max_refinement_cycles
 
     async def run(self, state: dict) -> dict:
-        """Execute and refine SPARQL until accepted or attempts are exhausted."""
-        print("\n=== Step 4: Validate SPARQL ===", flush=True)
-        runner = await self.agent_factory.create(
-            system_prompt=self.SYSTEM_PROMPT,
-            tool_names=self.TOOL_NAMES,
-            tool_call_limit=self.TOOL_CALL_LIMIT,
-        )
+        """Run result, statement, and hierarchy critique, then decide whether to refine."""
+        print("\n=== Step 6-8: Inspect Results and Critique ===", flush=True)
+        previous_critique = state.get("critique_summary", "")
 
-        query = state["sparql"]
-        result_text = ""
-        final_reason = state["validation_reason"]
+        result_summary = await self.inspect_result_items(state)
+        statement_summary = await self.inspect_result_statements(state, result_summary)
+        class_summary = await self.inspect_result_hierarchy(state, result_summary)
+        critique_summary = self.build_critique_summary(result_summary, statement_summary, class_summary)
 
-        for attempt in range(1, self.max_attempts + 1):
-            finalized = await self.finalize(state, {"query": query}, runner)
-            output = finalized["output"]
-            result_text = finalized["result_text"]
-            issue = finalized["issue"]
-            final_reason = output.reason
+        cycle = state.get("refinement_cycle", 0) + 1
+        should_refine, reason = self._should_refine(state, previous_critique, critique_summary, cycle)
 
-            if output.accepted and not issue:
-                print(f"Accepted on attempt {attempt}: {output.reason}")
-                break
-
-            refined = output.refined_sparql.strip()
-            if not refined or refined == query:
-                print(f"Stopped on attempt {attempt}: {output.reason}")
-                break
-            if attempt == self.max_attempts:
-                final_reason = f"{output.reason} Refinement was not executed because the attempt limit was reached."
-                break
-
-            query = refined
-            print(f"Refining after attempt {attempt}: {output.reason}")
+        critique_history = [
+            *state.get("critique_history", []),
+            {
+                "cycle": cycle,
+                "result_summary": result_summary,
+                "statement_summary": statement_summary,
+                "class_summary": class_summary,
+                "critique_summary": critique_summary,
+                "should_refine": should_refine,
+                "reason": reason,
+            },
+        ]
 
         return {
             **state,
-            "sparql": query,
-            "result": result_text,
-            "validation_reason": final_reason,
+            "result_inspection_summary": result_summary,
+            "statement_validation_summary": statement_summary,
+            "class_validation_summary": class_summary,
+            "critique_summary": critique_summary,
+            "critique_history": critique_history,
+            "refinement_cycle": cycle,
+            "should_refine": should_refine,
+            "validation_reason": reason,
         }
 
-    async def finalize(self, state: dict, result: dict, runner: AgentRunner) -> dict:
-        """Execute one query and semantically verify its result."""
-        query = result["query"]
-        allowed_ids = set(WIKIDATA_ID_PATTERN.findall("\n".join(state["evidence"])))
-        unsupported = set(WIKIDATA_ID_PATTERN.findall(query)) - allowed_ids
-        issue = ""
-        if unsupported:
-            issue = f"Unsupported identifiers: {', '.join(sorted(unsupported))}"
-        elif any(re.search(rf"\b{keyword}\b", query.upper()) for keyword in UPDATE_KEYWORDS):
-            issue = "Only read-only SPARQL queries are allowed."
-
-        result_text = issue
-        if not issue:
-            try:
-                execution_result = await runner.tools["execute_sparql"].ainvoke({"sparql": query, "K": 10})
-                if isinstance(execution_result, tuple) and execution_result:
-                    execution_result = execution_result[0]
-                if isinstance(execution_result, list):
-                    blocks = [
-                        block["text"]
-                        for block in execution_result
-                        if isinstance(block, dict)
-                        and block.get("type") == "text"
-                        and isinstance(block.get("text"), str)
-                    ]
-                    result_text = "\n".join(blocks) if blocks else json.dumps(execution_result, ensure_ascii=False)
-                elif isinstance(execution_result, str):
-                    result_text = execution_result
-                else:
-                    result_text = json.dumps(execution_result, ensure_ascii=False)
-            except Exception as exc:
-                issue = f"Execution failed: {exc}"
-                result_text = issue
-            if result_text.startswith(ERROR_PREFIXES):
-                issue = result_text
-
-        relationships = "\n- ".join(state["relationships"]) or "none"
-        prompt = (
-            f"Question: {state['question']}\n\n"
-            f"SPARQL:\n{query}\n\n"
-            f"Execution result:\n{result_text}\n\n"
-            f"Verified relationships:\n- {relationships}\n\n"
-            f"Mechanical issue: {issue or 'none'}\n"
-            f"Allowed identifiers: {', '.join(allowed_ids) or 'none'}"
+    @staticmethod
+    def build_critique_summary(result_summary: str, statement_summary: str, class_summary: str) -> str:
+        """Bundle each critique stage without interpreting model prose."""
+        sections = [
+            ("Step 6 Result Item Findings", result_summary),
+            ("Step 7 Result Statement Findings", statement_summary),
+            ("Step 8 Result Class Findings", class_summary),
+        ]
+        return "\n\n".join(
+            f"## {heading}\n{(summary or '').strip() or 'No findings reported by this stage.'}"
+            for heading, summary in sections
         )
-        agent_result = await runner.invoke_agent({"messages": [{"role": "user", "content": prompt}]}, "validate sparql")
-        output = agent_result["structured_response"]
-        if not isinstance(output, ValidationOutput):
-            output = ValidationOutput.model_validate(output)
-        return {"output": output, "result_text": result_text, "issue": issue}
+
+    async def inspect_result_items(self, state: dict) -> str:
+        """Inspect statements for returned result items."""
+        print("\n=== Step 6: Inspect Result Items ===", flush=True)
+        runner = await self.agent_factory.create(
+            system_prompt=self.RESULT_PROMPT,
+            tool_names=("get_statements",),
+            tool_call_limit=6,
+        )
+
+        result = await runner.invoke_agent(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Question:\n{state['question']}\n\n"
+                            "Discovery Summary:\n"
+                            f"{compact_text(state.get('discovery_summary', ''), max_chars=10000)}\n\n"
+                            f"Generated SPARQL:\n{state.get('sparql', '')}\n\n"
+                            f"Execution result:\n{compact_text(state.get('sparql_results', ''), max_chars=8000)}\n\n"
+                            f"Execution issue:\n{state.get('sparql_error') or 'none'}\n\n"
+                            "Use get_statements to inspect relevant returned items before writing only the "
+                            "Step 6 result-item findings note."
+                        ),
+                    }
+                ]
+            },
+            "inspect result items",
+        )
+        return message_text(result)
+
+    async def inspect_result_statements(self, state: dict, result_summary: str) -> str:
+        """Inspect statement values for result items and query properties."""
+        print("\n=== Step 7: Inspect Result Statements ===", flush=True)
+        runner = await self.agent_factory.create(
+            system_prompt=self.STATEMENT_PROMPT,
+            tool_names=("get_statement_values",),
+            tool_call_limit=8,
+        )
+
+        result = await runner.invoke_agent(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Question:\n{state['question']}\n\n"
+                            "Discovery Summary:\n"
+                            f"{compact_text(state.get('discovery_summary', ''), max_chars=9000)}\n\n"
+                            f"Generated SPARQL:\n{state.get('sparql', '')}\n\n"
+                            f"Execution result:\n{compact_text(state.get('sparql_results', ''), max_chars=7000)}\n\n"
+                            f"Step 6 Result Item Findings:\n{result_summary}\n\n"
+                            "Use get_statement_values to inspect relevant result statement values before "
+                            "writing only the Step 7 result-statement findings note."
+                        ),
+                    }
+                ]
+            },
+            "inspect result statements",
+        )
+        return message_text(result)
+
+    async def inspect_result_hierarchy(self, state: dict, result_summary: str) -> str:
+        """Inspect hierarchy for classes and result items."""
+        print("\n=== Step 8: Inspect Result Classes ===", flush=True)
+        runner = await self.agent_factory.create(
+            system_prompt=self.HIERARCHY_PROMPT,
+            tool_names=("get_instance_and_subclass_hierarchy",),
+            tool_call_limit=6,
+        )
+
+        result = await runner.invoke_agent(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Question:\n{state['question']}\n\n"
+                            "Discovery Summary:\n"
+                            f"{compact_text(state.get('discovery_summary', ''), max_chars=9000)}\n\n"
+                            f"Generated SPARQL:\n{state.get('sparql', '')}\n\n"
+                            f"Execution result:\n{compact_text(state.get('sparql_results', ''), max_chars=7000)}\n\n"
+                            f"Step 6 Result Item Findings:\n{result_summary}\n\n"
+                            "Use get_instance_and_subclass_hierarchy to inspect relevant classes or result "
+                            "items before writing only the Step 8 result-class findings note."
+                        ),
+                    }
+                ]
+            },
+            "inspect result hierarchy",
+        )
+        return message_text(result)
+
+    def _should_refine(
+        self,
+        state: dict,
+        previous_critique: str,
+        critique_summary: str,
+        cycle: int,
+    ) -> tuple[bool, str]:
+        """Decide whether LangGraph should loop back to SPARQL generation."""
+        max_cycles = state.get("max_refinement_cycles", self.max_refinement_cycles)
+        if cycle >= max_cycles:
+            return False, f"Stopped after refinement cycle {cycle}; max refinement cycles reached."
+
+        history = state.get("sparql_history", [])
+        stable_query = len(history) >= 2 and history[-1].strip() == history[-2].strip()
+        if stable_query:
+            return False, "Stopped because the generator produced the same SPARQL as the previous cycle."
+
+        stable_critique = bool(previous_critique) and previous_critique.strip() == critique_summary.strip()
+        if stable_critique:
+            return False, "Stopped because the critique summary did not change."
+
+        return True, f"Refining after cycle {cycle}; running another SPARQL attempt with the latest critique."
