@@ -30,14 +30,33 @@ class GenerateSparqlStep:
     SYSTEM_PROMPT = """\
     You are Step 5 of a Wikidata SPARQL generation workflow: write SPARQL only.
 
-    Use only the QIDs and PIDs grounded in the discovery and critique summaries.
-    Never invent QIDs or PIDs.
-    Return exactly one complete read-only Wikidata SPARQL query.
+    Use QIDs and PIDs only when they are grounded in the discovery and validation findings.
+    Include an identifier only when it appears in those findings.
+    Treat discovery and validation notes as staged evidence:
+    use grounded, question-relevant findings, and add constraints or refinements when those findings justify them.
 
-    Discovery and critique notes are grouped by stage.
-    If a stage note contains no grounded Wikidata findings for the question, treat that stage as unavailable.
-    Use subclass expansion only when the discovery summary recommends it.
-    If critique notes identify a missing or incorrect pattern, fix the query directly.
+    SPARQL writing tips:
+        • For class-based filtering, use:
+            wdt:P31/wdt:P279*
+            This expands both instance-of and subclass-of relationships.
+
+        • Add the label service to display readable names instead of QIDs:
+            SERVICE wikibase:label { bd:serviceParam wikibase:language "[AUTO_LANGUAGE],en,mul". }
+
+        • Filtering by date:
+            ?item wdt:P569 ?date.
+            FILTER(YEAR(?date) = 1998 && MONTH(?date) = 11 && DAY(?date) = 28)
+            This example filters by exact day.
+
+        • Getting normalized quantity values:
+            ?item p:P2048 ?statement. # P2048 = height
+            ?statement a wikibase:BestRank;
+                psn:P2048 ?valueNode.
+            ?valueNode wikibase:quantityUnit wd:Q11573; # unit in metres
+                wikibase:quantityAmount ?height.
+            This ensures all values are normalized and comparable across items.
+
+    Return exactly one complete read-only Wikidata SPARQL query.
     """  # noqa: E501
 
     def __init__(self, model_name: str, mcp_url: str | None = None) -> None:
@@ -45,7 +64,7 @@ class GenerateSparqlStep:
         self.agent_factory = AgentFactory(model_name=model_name, mcp_url=mcp_url)
 
     async def run(self, state: dict) -> dict:
-        """Generate SPARQL, execute it, and return execution text for critique."""
+        """Generate SPARQL, execute it, and return execution text for validation."""
         print("\n=== Step 5: Generate and Execute SPARQL ===", flush=True)
         runner = await self.agent_factory.create(
             system_prompt=self.SYSTEM_PROMPT,
@@ -96,8 +115,8 @@ class GenerateSparqlStep:
         if previous_sparql:
             parts.append(f"Previous SPARQL:\n{previous_sparql}")
         if critique:
-            parts.append(f"Critique and refinement notes:\n{self._format_critique_findings(state)}")
-        parts.append("Return only the complete SPARQL query.")
+            parts.append(f"Validation findings and refinement notes:\n{self._format_critique_findings(state)}")
+        parts.append("Return the complete SPARQL query in the structured `sparql` field.")
         return "\n\n".join(parts)
 
     def _format_discovery_findings(self, state: dict) -> str:
@@ -113,14 +132,14 @@ class GenerateSparqlStep:
         return self._format_stage_sections(sections, max_chars_per_section=3500)
 
     def _format_critique_findings(self, state: dict) -> str:
-        """Format critique stage notes without interpreting them."""
+        """Format validation stage notes without interpreting them."""
         sections = [
             ("Step 6 Result Item Findings", state.get("result_inspection_summary", "")),
             ("Step 7 Result Statement Findings", state.get("statement_validation_summary", "")),
             ("Step 8 Result Class Findings", state.get("class_validation_summary", "")),
         ]
         if not any(summary for _, summary in sections):
-            sections = [("Critique Summary", state.get("critique_summary", ""))]
+            sections = [("Validation Findings", state.get("critique_summary", ""))]
         return self._format_stage_sections(sections, max_chars_per_section=3000)
 
     @staticmethod

@@ -13,53 +13,51 @@ class InspectStructureStep:
     You are Step 2 of a Wikidata SPARQL generation workflow: inspect items.
 
     Your only tool is get_statements. Use it to inspect candidate items from Step 1.
-    Select statements that are relevant to answering the question.
-    Compare examples and counterexamples to find which statements separate correct answers from false positives.
-    Do not assume that a searched property is correct until item statements support it.
+    Use Step 1 search findings as context.
+    Treat searched candidates as unverified until get_statements supports them.
+    Focus on statements that help distinguish correct answers from false positives.
 
-    Write an item-statement findings note.
-    Use prior search findings as context, but summarize only what this step learned from get_statements.
-    If the tool output does not establish a relationship, say it remains unverified.
-    Include:
-    - Which inspected items are useful examples or anchors.
-    - Relevant item statements, including subject QID, property PID, value QID or literal, and why each matters.
-    - Candidate properties that appear correct, incorrect, or still uncertain.
-    - What statement values or qualifiers should be inspected next.
+    Write only a Step 2 item-statement findings note containing:
+    - Useful inspected items or anchors, with QIDs and why they matter for the question.
+    - Relevant statements, with subject QID, property PID, value QID or literal, and why each matters.
+    - Candidate properties marked as supported, unsupported, or still uncertain based on inspected statements.
+    - Example and counterexample items that reveal Wikidata modeling patterns.
+    - Entity-property pairs that Step 3 should inspect next.
+    - "No grounded findings for this step" when the tool output gives no useful question-relevant evidence.
     """  # noqa: E501
 
     STATEMENT_PROMPT = """\
     You are Step 3 of a Wikidata SPARQL generation workflow: inspect statement values.
 
     Your only tool is get_statement_values. Use it for entity-property pairs identified in Step 2.
-    Look for qualifiers, ranks, deprecated values, references, and value modeling that could change the SPARQL.
-    Inspect both positive examples and counterexamples when a property may include non-answer values.
+    Use Step 1 search findings and Step 2 item-statement findings as context.
+    Prioritize pairs whose values, qualifiers, or ranks could change how the question is answered.
+    Inspect positive examples and counterexamples when a property may contain both answer and non-answer values.
 
-    Write a statement-detail findings note.
-    Use Steps 1-2 as context, but summarize only what this step learned from get_statement_values.
-    If Steps 1-2 do not provide usable entity-property pairs, say what is missing instead of inventing pairs.
-    Include:
+    Write only a Step 3 statement-detail findings note containing:
     - Confirmed entity-property pairs and how their values are modeled.
-    - Relevant qualifiers with qualifier PIDs and values.
-    - Rank/deprecated-value concerns if they affect SPARQL.
-    - Relationships or qualifiers that should or should not be used in the query.
-    - What classes or hierarchy should be inspected next.
+    - Relevant values, with value QIDs or literals, ranks, and qualifier PIDs when they affect the question.
+    - Properties or qualifiers marked as supported, unsupported, or still uncertain based on inspected values.
+    - Value patterns that the SPARQL generator should preserve.
+    - Class or hierarchy questions that Step 4 should inspect next.
+    - "No grounded findings for this step" when Step 2 gives no usable pairs or the tool output gives no useful evidence.
     """  # noqa: E501
 
     HIERARCHY_PROMPT = """\
     You are Step 4 of a Wikidata SPARQL generation workflow: inspect class hierarchy.
 
     Your only tool is get_instance_and_subclass_hierarchy. Use it to inspect candidate entities and classes from Steps 1-2.
-    Decide which classes are safe to filter on, which are too broad or too narrow, and whether subclass expansion is needed.
-    Compare broad and narrow classes for values that appeared in both examples and counterexamples.
-    You may describe graph patterns such as using instance-of/subclass-of expansion.
+    Use Step 1 search findings and Step 2 item-statement findings as context.
+    Focus on classes that could be used to filter answers or exclude false positives.
+    Compare class paths for the useful examples and counterexamples from Step 2.
 
-    Write a class-hierarchy findings note.
-    Use Steps 1-2 as context, but summarize only what this step learned from get_instance_and_subclass_hierarchy.
-    Include:
-    - Classes inspected and whether each is safe, too broad, too narrow, or uncertain.
-    - Whether subclass expansion is needed and which class QIDs justify it.
-    - Example or counterexample items that clarify class filtering.
-    - Class/filter traps the SPARQL generator must avoid.
+    Write only a Step 4 class-hierarchy findings note containing:
+    - Entities or classes inspected, with QIDs.
+    - Relevant instance-of/subclass-of paths found by the tool.
+    - Candidate class filters marked as supported, too broad, too narrow, or still uncertain.
+    - Whether subclass expansion is supported, and which class QIDs justify it.
+    - Example and counterexample items that clarify class filtering.
+    - "No grounded findings for this step" when the hierarchy output gives no useful question-relevant evidence.
     """  # noqa: E501
 
     def __init__(self, model_name: str, mcp_url: str) -> None:
@@ -107,7 +105,7 @@ class InspectStructureStep:
         runner = await self.agent_factory.create(
             system_prompt=self.ITEM_PROMPT,
             tool_names=("get_statements",),
-            tool_call_limit=6,
+            tool_call_limit=5,
         )
 
         result = await runner.invoke_agent(
@@ -134,7 +132,7 @@ class InspectStructureStep:
         runner = await self.agent_factory.create(
             system_prompt=self.STATEMENT_PROMPT,
             tool_names=("get_statement_values",),
-            tool_call_limit=8,
+            tool_call_limit=5,
         )
 
         result = await runner.invoke_agent(
@@ -162,7 +160,7 @@ class InspectStructureStep:
         runner = await self.agent_factory.create(
             system_prompt=self.HIERARCHY_PROMPT,
             tool_names=("get_instance_and_subclass_hierarchy",),
-            tool_call_limit=6,
+            tool_call_limit=3,
         )
 
         result = await runner.invoke_agent(
