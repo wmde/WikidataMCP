@@ -20,16 +20,16 @@ are not responsible for rewriting the whole discovery.
    `get_statement_values`, then class hierarchy with
    `get_instance_and_subclass_hierarchy`. The code bundles Step 1-4 notes under
    stage headers for SPARQL generation without interpreting their contents.
-3. `generate_sparql` receives all discovery findings and critique notes, but no
-   tools. It uses structured output to return one read-only SPARQL query. Python
-   validates the query and executes it against Wikidata.
-4. `validate_sparql` writes three independent critique notes:
+3. `generate_sparql` receives all discovery findings and validation findings,
+   but no tools. It uses structured output to return one read-only SPARQL query.
+   Python validates the query and executes it against Wikidata.
+4. `validate_sparql` writes three independent validation findings notes:
    result item statements, result statement details, and result hierarchy. The
    code bundles Step 6-8 notes for the next generation attempt without treating
-   the hierarchy note as the whole critique.
+   the hierarchy note as the whole validation finding.
 5. LangGraph loops from `validate_sparql` back to `generate_sparql`, stopping
-   when the query or critique stabilizes, or when the configured cycle limit is
-   reached.
+   when the query or validation findings stabilize, or when the configured cycle
+   limit is reached.
 
 Shared code:
 
