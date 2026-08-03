@@ -60,6 +60,10 @@ python main.py "Who are the presidents of France?" \
   --max-refinement-cycles 3
 ```
 
+**Warning**: Keep _--max-refinement-cycles_ low. Every refinement cycle
+can execute another query against the Wikidata Query Service. Increasing the limit,
+especially across multiple or concurrent runs, may place unnecessary load.
+
 Use `python -m pip` rather than `pip` so dependencies are installed for the
 same Python interpreter that runs the workflow. The isolated virtual environment
 avoids conflicts with older LangChain packages installed elsewhere.
