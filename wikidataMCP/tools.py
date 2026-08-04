@@ -2,7 +2,6 @@
 
 import json
 import logging
-import os
 import time
 
 import requests
@@ -87,28 +86,28 @@ async def search_items(query: str, lang: str = "en") -> str:
     """  # noqa: E501
     start_time = time.time()
     user_agent = _current_user_agent()
-    
+
     try:
-      if not query.strip():
-          return "Query cannot be empty."
+        if not query.strip():
+            return "Query cannot be empty."
 
-      try:
-          results = await _search_entities(query, "item", lang, user_agent, "search_items")
-      except requests.RequestException as exc:
-          logger.warning("search_items: Wikidata request failed: %s", exc)
-          return "Wikidata is currently unavailable. Please retry shortly."
-      except Exception as exc:
-          logger.error("search_items: Unexpected server error: %s", exc)
-          return "Unexpected server error while processing the request."
+        try:
+            results = await _search_entities(query, "item", lang, user_agent, "search_items")
+        except requests.RequestException as exc:
+            logger.warning("search_items: Wikidata request failed: %s", exc)
+            return "Wikidata is currently unavailable. Please retry shortly."
+        except Exception as exc:
+            logger.error("search_items: Unexpected server error: %s", exc)
+            return "Unexpected server error while processing the request."
 
-      if not results:
-          return "No matching items found. Try another query."
+        if not results:
+            return "No matching items found. Try another query."
 
-      text_val = [
-          f"{entity_id}: {val.get('label', '')} — {val.get('description', '')}" for entity_id, val in results.items()
-      ]
-      return "\n".join(text_val)
-    
+        text_val = [
+            f"{entity_id}: {val.get('label', '')} — {val.get('description', '')}" for entity_id, val in results.items()
+        ]
+        return "\n".join(text_val)
+
     finally:
         Logger.add_request_async(
             toolname="search_items",
@@ -117,7 +116,7 @@ async def search_items(query: str, lang: str = "en") -> str:
             user_agent=user_agent,
         )
 
-        
+
 @mcp.tool()
 async def search_properties(query: str, lang: str = "en") -> str:
     """Search Wikidata properties (PIDs) using semantic and keyword search.
@@ -139,28 +138,28 @@ async def search_properties(query: str, lang: str = "en") -> str:
     """  # noqa: E501
     start_time = time.time()
     user_agent = _current_user_agent()
-    
+
     try:
-      if not query.strip():
-          return "Query cannot be empty."
+        if not query.strip():
+            return "Query cannot be empty."
 
-      try:
-          results = await _search_entities(query, "property", lang, user_agent, "search_properties")
-      except requests.RequestException as exc:
-          logger.warning("search_properties: Wikidata request failed: %s", exc)
-          return "Wikidata is currently unavailable. Please retry shortly."
-      except Exception as exc:
-          logger.error("search_properties: Unexpected server error: %s", exc)
-          return "Unexpected server error while processing the request."
+        try:
+            results = await _search_entities(query, "property", lang, user_agent, "search_properties")
+        except requests.RequestException as exc:
+            logger.warning("search_properties: Wikidata request failed: %s", exc)
+            return "Wikidata is currently unavailable. Please retry shortly."
+        except Exception as exc:
+            logger.error("search_properties: Unexpected server error: %s", exc)
+            return "Unexpected server error while processing the request."
 
-      if not results:
-          return "No matching properties found. Try another query."
+        if not results:
+            return "No matching properties found. Try another query."
 
-      text_val = [
-          f"{entity_id}: {val.get('label', '')} — {val.get('description', '')}" for entity_id, val in results.items()
-      ]
-      return "\n".join(text_val)
-    
+        text_val = [
+            f"{entity_id}: {val.get('label', '')} — {val.get('description', '')}" for entity_id, val in results.items()
+        ]
+        return "\n".join(text_val)
+
     finally:
         Logger.add_request_async(
             toolname="search_properties",
@@ -195,32 +194,32 @@ async def get_statements(entity_id: str, include_external_ids: bool = False, lan
     """  # noqa: E501
     start_time = time.time()
     user_agent = _current_user_agent()
-    
+
     try:
-      if not entity_id.strip():
-          return "Entity ID cannot be empty."
+        if not entity_id.strip():
+            return "Entity ID cannot be empty."
 
-      try:
-          result = await utils.get_entities_triplets(
-              [entity_id],
-              external_ids=include_external_ids,
-              all_ranks=False,
-              qualifiers=False,
-              lang=lang,
-              user_agent=user_agent,
-          )
-      except requests.RequestException as exc:
-          logger.warning("get_statements: Wikidata request failed: %s", exc)
-          return "Wikidata is currently unavailable. Please retry shortly."
-      except Exception as exc:
-          logger.error("get_statements: Unexpected server error: %s", exc)
-          return "Unexpected server error while processing the request."
+        try:
+            result = await utils.get_entities_triplets(
+                [entity_id],
+                external_ids=include_external_ids,
+                all_ranks=False,
+                qualifiers=False,
+                lang=lang,
+                user_agent=user_agent,
+            )
+        except requests.RequestException as exc:
+            logger.warning("get_statements: Wikidata request failed: %s", exc)
+            return "Wikidata is currently unavailable. Please retry shortly."
+        except Exception as exc:
+            logger.error("get_statements: Unexpected server error: %s", exc)
+            return "Unexpected server error while processing the request."
 
-      if (not result) or (entity_id not in result):
-          return f"Entity {entity_id} not found. Try finding correct IDs with search."
+        if (not result) or (entity_id not in result):
+            return f"Entity {entity_id} not found. Try finding correct IDs with search."
 
-      return result.get(entity_id)
-    
+        return result.get(entity_id)
+
     finally:
         Logger.add_request_async(
             toolname="get_statements",
@@ -270,40 +269,40 @@ async def get_statement_values(entity_id: str, property_id: str, lang: str = "en
     """  # noqa: E501
     start_time = time.time()
     user_agent = _current_user_agent()
-    
+
     try:
-      if not enti ty_id.strip():
-          return "Entity ID cannot be empty."
-      if not property_id.strip():
-          return "Property ID cannot be empty."
+        if not entity_id.strip():
+            return "Entity ID cannot be empty."
+        if not property_id.strip():
+            return "Property ID cannot be empty."
 
-      try:
-          result = await utils.get_triplet_values(
-              [entity_id],
-              pid=[property_id],
-              external_ids=True,
-              references=True,
-              all_ranks=True,
-              qualifiers=True,
-              lang=lang,
-              user_agent=user_agent,
-          )
-      except requests.RequestException as exc:
-          logger.warning("get_statement_values: Wikidata request failed: %s", exc)
-          return "Wikidata is currently unavailable. Please retry shortly."
-      except Exception as exc:
-          logger.error("get_statement_values: Unexpected server error: %s", exc)
-          return "Unexpected server error while processing the request."
+        try:
+            result = await utils.get_triplet_values(
+                [entity_id],
+                pid=[property_id],
+                external_ids=True,
+                references=True,
+                all_ranks=True,
+                qualifiers=True,
+                lang=lang,
+                user_agent=user_agent,
+            )
+        except requests.RequestException as exc:
+            logger.warning("get_statement_values: Wikidata request failed: %s", exc)
+            return "Wikidata is currently unavailable. Please retry shortly."
+        except Exception as exc:
+            logger.error("get_statement_values: Unexpected server error: %s", exc)
+            return "Unexpected server error while processing the request."
 
-      if (not result) or (entity_id not in result):
-          return f"Entity {entity_id} not found. Try finding correct IDs with search."
+        if (not result) or (entity_id not in result):
+            return f"Entity {entity_id} not found. Try finding correct IDs with search."
 
-      entity = result.get(entity_id)
-      text = utils.triplet_values_to_string(entity_id, property_id, entity)
-      if not text:
-          return f"No statement found for {entity_id} with property {property_id}. Check {entity_id}'s statements."
-      return text
-      
+        entity = result.get(entity_id)
+        text = utils.triplet_values_to_string(entity_id, property_id, entity)
+        if not text:
+            return f"No statement found for {entity_id} with property {property_id}. Check {entity_id}'s statements."
+        return text
+
     finally:
         Logger.add_request_async(
             toolname="get_statement_values",
@@ -353,30 +352,30 @@ async def get_instance_and_subclass_hierarchy(entity_id: str, max_depth: int = 5
     start_time = time.time()
     user_agent = _current_user_agent()
 
-  try:
-      if not entity_id.strip():
-          return "Entity ID cannot be empty."
-      if max_depth < 0:
-          return "max_depth must be greater than or equal to 0."
+    try:
+        if not entity_id.strip():
+            return "Entity ID cannot be empty."
+        if max_depth < 0:
+            return "max_depth must be greater than or equal to 0."
 
-      try:
-          result = await utils.get_hierarchy_data(entity_id, max_depth, lang=lang, user_agent=user_agent)
-      except requests.RequestException as exc:
-          logger.warning("get_instance_and_subclass_hierarchy: Wikidata request failed: %s", exc)
-          return "Wikidata is currently unavailable. Please retry shortly."
-      except Exception as exc:
-          logger.error("get_instance_and_subclass_hierarchy: Unexpected server error: %s", exc)
-          return "Unexpected server error while processing the request."
+        try:
+            result = await utils.get_hierarchy_data(entity_id, max_depth, lang=lang, user_agent=user_agent)
+        except requests.RequestException as exc:
+            logger.warning("get_instance_and_subclass_hierarchy: Wikidata request failed: %s", exc)
+            return "Wikidata is currently unavailable. Please retry shortly."
+        except Exception as exc:
+            logger.error("get_instance_and_subclass_hierarchy: Unexpected server error: %s", exc)
+            return "Unexpected server error while processing the request."
 
-      if (not result) or (entity_id not in result):
-          return f"Entity {entity_id} not found. Try finding the correct IDs with search."
+        if (not result) or (entity_id not in result):
+            return f"Entity {entity_id} not found. Try finding the correct IDs with search."
 
-      try:
-          result = utils.hierarchy_to_json(entity_id, result, level=max_depth)
-          return json.dumps(result, indent=2)
-      except Exception as exc:
-          logger.error("get_instance_and_subclass_hierarchy: Unexpected server error: %s", exc)
-          return "Unexpected server error while processing the request."
+        try:
+            result = utils.hierarchy_to_json(entity_id, result, level=max_depth)
+            return json.dumps(result, indent=2)
+        except Exception as exc:
+            logger.error("get_instance_and_subclass_hierarchy: Unexpected server error: %s", exc)
+            return "Unexpected server error while processing the request."
 
     finally:
         Logger.add_request_async(
@@ -435,51 +434,51 @@ async def execute_sparql(sparql: str, K: int = 10) -> str:
     """  # noqa: E501
     start_time = time.time()
     user_agent = _current_user_agent()
-    
+
     try:
-      if not sparql.strip():
-          return "SPARQL query cannot be empty."
-      if K <= 0:
-          return "K must be greater than 0."
+        if not sparql.strip():
+            return "SPARQL query cannot be empty."
+        if K <= 0:
+            return "K must be greater than 0."
 
-      try:
-          result = await utils.execute_sparql(
-              sparql,
-              K=K,
-              user_agent=_current_user_agent(),
-          )
-      except ValueError as exc:
-          logger.warning("execute_sparql: Invalid query: %s", exc)
-          return str(exc)
-      except requests.RequestException as exc:
-          logger.warning("execute_sparql: Wikidata request failed: %s", exc)
-          return "Wikidata is currently unavailable. Please retry shortly."
-      except Exception as exc:
-          logger.error("execute_sparql: Unexpected server error: %s", exc)
-          return "Unexpected server error while processing the request."
+        try:
+            result = await utils.execute_sparql(
+                sparql,
+                K=K,
+                user_agent=_current_user_agent(),
+            )
+        except ValueError as exc:
+            logger.warning("execute_sparql: Invalid query: %s", exc)
+            return str(exc)
+        except requests.RequestException as exc:
+            logger.warning("execute_sparql: Wikidata request failed: %s", exc)
+            return "Wikidata is currently unavailable. Please retry shortly."
+        except Exception as exc:
+            logger.error("execute_sparql: Unexpected server error: %s", exc)
+            return "Unexpected server error while processing the request."
 
-      if len(result) == 0:
-          return (
-              "SPARQL query returned no data.\n"
-              "Re-discover QIDs with search tools, "
-              "verify patterns and entity relationships with statement tools, "
-              "check class paths with the hierarchy tool, "
-              "then refine the SPARQL query and retry."
-          )
+        if len(result) == 0:
+            return (
+                "SPARQL query returned no data.\n"
+                "Re-discover QIDs with search tools, "
+                "verify patterns and entity relationships with statement tools, "
+                "check class paths with the hierarchy tool, "
+                "then refine the SPARQL query and retry."
+            )
 
-      try:
-          return result.to_csv(sep=";", index=True, header=True)
-      except Exception as exc:
-          logger.error("execute_sparql: Unexpected server error: %s", exc)
-          return "Unexpected server error while processing the request."
-          
+        try:
+            return result.to_csv(sep=";", index=True, header=True)
+        except Exception as exc:
+            logger.error("execute_sparql: Unexpected server error: %s", exc)
+            return "Unexpected server error while processing the request."
+
     finally:
-      Logger.add_request_async(
-          toolname="execute_sparql",
-          start_time=start_time,
-          parameters={"sparql": sparql, "K": K},
-          user_agent=user_agent,
-      )
+        Logger.add_request_async(
+            toolname="execute_sparql",
+            start_time=start_time,
+            parameters={"sparql": sparql, "K": K},
+            user_agent=user_agent,
+        )
 
 
 @mcp.prompt

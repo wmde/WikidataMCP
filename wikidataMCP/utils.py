@@ -63,7 +63,6 @@ async def keywordsearch(query: str, type: str = "item", limit: int = 10, lang: s
     return item_dict
 
 
-
 async def vectorsearch(query: str, type: str = "item", limit: int = 10, lang: str = "en", user_agent="") -> list:
     """Searches for Wikidata items or properties similar to the input text using a vector database.
 
