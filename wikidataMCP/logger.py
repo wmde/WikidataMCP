@@ -4,8 +4,7 @@ import asyncio
 import os
 import time
 import traceback
-from datetime import datetime, timedelta, timezone
-from hashlib import sha256
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
