@@ -154,12 +154,7 @@ async def search_properties(query: str, lang: str = "en", include_external_ids: 
 
         try:
             results = await _search_entities(
-                query,
-                "property",
-                lang,
-                user_agent,
-                "search_properties",
-                include_external_ids
+                query, "property", lang, user_agent, "search_properties", include_external_ids
             )
         except requests.RequestException as exc:
             logger.warning("search_properties: Wikidata request failed: %s", exc)
