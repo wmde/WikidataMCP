@@ -4,8 +4,7 @@ import asyncio
 import os
 import time
 import traceback
-from datetime import datetime, timedelta, timezone
-from hashlib import sha256
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
@@ -61,10 +60,7 @@ class Logger(Base):
     parameters = Column(JSON, default=dict, nullable=False)
     response_time = Column(Float, nullable=False)
     is_redacted = Column(Boolean, default=False, index=True, nullable=False)
-
-    # User Agent
     user_agent = Column(String(255))
-    user_agent_hash = Column(String(64), index=True, nullable=False)
 
     @staticmethod
     def add_request(
@@ -83,16 +79,10 @@ class Logger(Base):
         """
         with Session() as session:
             try:
-                # Clean up old logs (older than 90 days)
-                Logger.redact_old_requests(90, 1000)
-
-                user_agent_hash = sha256(user_agent.encode("utf-8")).hexdigest()
-
                 # Add new log entry
                 log_entry = Logger(
                     toolname=toolname[:128] if toolname else "",
                     user_agent=user_agent,
-                    user_agent_hash=user_agent_hash,
                     parameters=parameters,
                     response_time=time.time() - start_time,
                     is_redacted=False,
@@ -112,39 +102,6 @@ class Logger(Base):
         except Exception:
             # no running loop (safe fallback)
             Logger.add_request(**kwargs)
-
-    @staticmethod
-    def redact_old_requests(days: int = 90, batch_size: int = 1000):
-        """Redact old request logs.
-
-        Args:
-            days (int, optional): The age of logs to redact in days. Defaults to 90.
-            batch_size (int, optional): The number of logs to process in each batch. Defaults to 1000.
-        """
-        cutoff_date = _utcnow_naive() - timedelta(days=days)
-        with Session() as session:
-            try:
-                old_requests = (
-                    session.query(Logger)
-                    .filter(Logger.timestamp < cutoff_date)
-                    .filter((Logger.is_redacted.is_(None)) | (Logger.is_redacted.is_(False)))
-                    .order_by(Logger.id.asc())
-                    .yield_per(batch_size)
-                )
-
-                changed = False
-                for row in old_requests:
-                    row.user_agent = ""
-                    row.parameters = {}
-                    row.is_redacted = True
-                    changed = True
-
-                if changed:
-                    session.commit()
-
-            except Exception:
-                session.rollback()
-                traceback.print_exc()
 
 
 def initialize_database():
