@@ -63,7 +63,14 @@ async def keywordsearch(query: str, type: str = "item", limit: int = 10, lang: s
     return item_dict
 
 
-async def vectorsearch(query: str, type: str = "item", limit: int = 10, lang: str = "en", user_agent="") -> list:
+async def vectorsearch(
+    query: str,
+    type: str = "item",
+    limit: int = 10,
+    lang: str = "en",
+    include_external_ids: bool = False,
+    user_agent="",
+) -> list:
     """Searches for Wikidata items or properties similar to the input text using a vector database.
 
     Args:
@@ -73,6 +80,8 @@ async def vectorsearch(query: str, type: str = "item", limit: int = 10, lang: st
         limit (int, optional): Maximum number of results to return. Defaults to 10.
         lang (str, optional): Language code used when resolving labels.
             Defaults to "en".
+        include_external_ids (bool, optional): Whether to include external identifier properties.
+            Defaults to False.
         user_agent (str, optional): Caller-provided suffix appended to
             the service User-Agent. Defaults to "".
 
@@ -87,6 +96,7 @@ async def vectorsearch(query: str, type: str = "item", limit: int = 10, lang: st
             "query": query,
             "lang": lang,
             "k": limit,
+            "exclude_external_ids": not include_external_ids,
         },
         headers={"User-Agent": f"{USER_AGENT} ({user_agent})"},
     )

@@ -45,13 +45,21 @@ def _current_user_agent() -> str:
         return ""
 
 
-async def _search_entities(query: str, entity_type: str, lang: str, user_agent: str, tool_name: str):
+async def _search_entities(
+    query: str,
+    entity_type: str,
+    lang: str,
+    user_agent: str,
+    tool_name: str,
+    include_external_ids: bool = False,
+):
     """Helper function for vector search with a keyword search fallback for items or properties."""
     try:
         return await utils.vectorsearch(
             query,
             type=entity_type,
             lang=lang,
+            include_external_ids=include_external_ids,
             user_agent=user_agent,
         )
     except requests.RequestException as exc:
@@ -118,7 +126,7 @@ async def search_items(query: str, lang: str = "en") -> str:
 
 
 @mcp.tool()
-async def search_properties(query: str, lang: str = "en") -> str:
+async def search_properties(query: str, lang: str = "en", include_external_ids: bool = False) -> str:
     """Search Wikidata properties (PIDs) using semantic and keyword search.
 
     Never invent or use memorized property PIDs; use this tool to discover candidate PIDs.
@@ -126,6 +134,7 @@ async def search_properties(query: str, lang: str = "en") -> str:
     Args:
         query: Natural-language text for searching Wikidata.
         lang: Language code.
+        include_external_ids: Whether to include external identifier properties.
 
     Returns:
         Newline-separated property candidates:
@@ -144,7 +153,9 @@ async def search_properties(query: str, lang: str = "en") -> str:
             return "Query cannot be empty."
 
         try:
-            results = await _search_entities(query, "property", lang, user_agent, "search_properties")
+            results = await _search_entities(
+                query, "property", lang, user_agent, "search_properties", include_external_ids
+            )
         except requests.RequestException as exc:
             logger.warning("search_properties: Wikidata request failed: %s", exc)
             return "Wikidata is currently unavailable. Please retry shortly."
