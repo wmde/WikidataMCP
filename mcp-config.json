@@ -1,9 +1,8 @@
 {
-	"servers": {
-		"Wikidata": {
-			"url": "https://wd-mcp.wmcloud.org/mcp/",
-			"type": "http"
-		}
-	},
-	"inputs": []
+  "mcpServers": {
+    "wikidata": {
+      "type": "streamable_http",
+      "url": "https://wd-mcp.wmcloud.org/mcp/"
+    }
+  }
 }
