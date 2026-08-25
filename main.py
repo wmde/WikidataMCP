@@ -2,6 +2,7 @@
 
 import inspect
 import os
+import time
 from typing import Any
 
 import uvicorn
@@ -15,7 +16,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.templating import Jinja2Templates
 
-from wikidataMCP import tools
+from wikidataMCP import logger, tools
 
 templates = Jinja2Templates(directory="templates")
 mcp = tools.mcp
@@ -29,6 +30,7 @@ app = FastAPI(
     lifespan=mcp_app.lifespan,
 )
 
+
 TOOLS_RATE_LIMIT = os.getenv("TOOLS_RATE_LIMIT", "10/minute")
 limiter = Limiter(key_func=lambda request: "tools-global")
 app.state.limiter = limiter
@@ -38,7 +40,6 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 @app.middleware("http")
 async def normalize_mcp_root_path(request: Request, call_next):
     """Normalize `/mcp` requests to `/mcp/` for transport compatibility."""
-    # Accept both /mcp and /mcp/ without relying on client-side redirect handling.
     if request.scope.get("path") == "/mcp":
         request.scope["path"] = "/mcp/"
     return await call_next(request)
@@ -124,18 +125,28 @@ def _register_tool_routes() -> None:
 @app.get("/", include_in_schema=False)
 async def home(request: Request):
     """Render the landing page with the prompt and available tool list."""
-    prompt = await mcp.get_prompt("explore_wikidata")
-    prompt_rendered = await prompt.render({"query": "[User Prompt]"})
-    prompt_html = markdown(prompt_rendered[0].content.text)
+    start_time = time.time()
 
-    return templates.TemplateResponse(
-        request,
-        "docs.html",
-        {
-            "tools": tools.TOOL_LIST.keys(),
-            "prompt": prompt_html,
-        },
-    )
+    try:
+        prompt = await mcp.get_prompt("explore_wikidata")
+        prompt_rendered = await prompt.render({"query": "[User Prompt]"})
+        prompt_html = markdown(prompt_rendered[0].content.text)
+
+        return templates.TemplateResponse(
+            request,
+            "docs.html",
+            {
+                "tools": tools.TOOL_LIST.keys(),
+                "prompt": prompt_html,
+            },
+        )
+    finally:
+        logger.Logger.add_request_async(
+            toolname="/",
+            start_time=start_time,
+            parameters={},
+            user_agent=request.headers.get("user-agent", "unknown")[:255],
+        )
 
 
 @app.get("/health", tags=["meta"])
